@@ -1,0 +1,7 @@
+# Server implementation files are not browser endpoints.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Deny from all
+</IfModule>
