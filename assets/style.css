@@ -215,3 +215,20 @@ body[data-table-size]:not([data-table-size="5"]) .seat-picker button{flex:0 0 28
   .expanded-table .board-rail{inset:22px 3px 40px}
   .expanded-table .felt{inset:29px 10px 47px}
 }
+
+/* Quick play keeps the normal selection controls and asks before using matches. */
+.hand-cards button.card{user-select:none}
+.matching-dialog{max-width:420px;padding:22px}
+.matching-dialog .dialog-heading h2{font-size:25px}
+.matching-count{font-size:12px;line-height:1.7;color:var(--muted);margin:14px 0}
+.matching-cards{display:flex;justify-content:center;flex-wrap:wrap;gap:9px;padding:8px 0 22px}
+.matching-cards .card:first-child{outline:2px solid var(--gold);outline-offset:2px}
+.matching-actions{display:flex;gap:9px;align-items:stretch}
+.matching-actions button{flex:1;min-width:0;font-size:11px;line-height:1.4;padding:11px 8px}
+.matching-dialog>#quick-play-cancel{display:block;margin:12px auto 0;font-size:11px}
+@media(max-height:520px){.matching-dialog{padding:16px}.matching-dialog .dialog-heading h2{font-size:22px}.matching-count{margin:8px 0}.matching-cards{padding:5px 0 14px}.matching-cards .card{width:48px;height:68px}}
+/* A hand card must stay under the pointer throughout both native clicks. */
+.hand-cards button.card[data-source="hand"],
+.hand-cards button.card[data-source="hand"]:hover,
+.hand-cards button.card[data-source="hand"].selected,
+.hand-cards button.card[data-source="hand"].selected:hover{transform:none}
