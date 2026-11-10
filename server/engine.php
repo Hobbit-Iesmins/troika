@@ -20,9 +20,11 @@ function tk_index(array $g, string $id): int {
     foreach ($g['players'] as $i=>$p) if ($p['id']===$id) return $i;
     throw new RuntimeException('This seat no longer exists. Join the table again.');
 }
-function tk_touch(array &$g, string $text, string $type='play', ?string $playerId=null): void {
+function tk_touch(array &$g, string $text, string $type='play', ?string $playerId=null, array $cards=[]): void {
     $g['version']++; $g['updatedAt']=tk_now();
-    $g['events'][]=['id'=>++$g['eventSeq'],'text'=>$text,'type'=>$type,'playerId'=>$playerId];
+    // Store only cards made public by this action, never unplayed hand/blind cards.
+    $faces=array_map(fn($c)=>['rank'=>$c['rank'],'suit'=>$c['suit']],$cards);
+    $g['events'][]=['id'=>++$g['eventSeq'],'text'=>$text,'type'=>$type,'playerId'=>$playerId,'cards'=>$faces];
     if (count($g['events'])>40) $g['events']=array_slice($g['events'],-40);
 }
 function tk_phase(array $p): string {
@@ -122,7 +124,7 @@ function tk_play(array &$g, string $id, string $source, array $ids): void {
         $taken=count($g['pile'])+count($selected);
         $p['hand']=array_merge($p['hand'],$g['pile'],$selected); $g['pile']=[]; $p['stats']['pickups']++;
         tk_sort_hand($p); unset($p);
-        tk_touch($g,$name.' reveals '.tk_rank_name($rank).' and picks up '.$taken.' cards.','pickup',$id);
+        tk_touch($g,$name.' reveals '.tk_rank_name($rank).' and picks up '.$taken.' cards.','pickup',$id,$selected);
         tk_finish_and_advance($g,$id); return;
     }
     $g['pile']=array_merge($g['pile'],$selected);
@@ -136,9 +138,9 @@ function tk_play(array &$g, string $id, string $source, array $ids): void {
     $burn=$rank===10 || $four;
     if ($burn) {
         $burned=count($g['pile']); $g['hole']=array_merge($g['hole'],$g['pile']); $g['pile']=[]; $g['players'][$i]['stats']['burns']++;
-        tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).'. '.($rank===10?'Ten burns':'Four of a kind burns').' '.$burned.' cards. Extra turn!','burn',$id);
+        tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).'. '.($rank===10?'Ten burns':'Four of a kind burns').' '.$burned.' cards. Extra turn!','burn',$id,$selected);
     } else {
-        tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).($rank===6?'. The pile is reset.':'.'),'play',$id);
+        tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).($rank===6?'. The pile is reset.':'.'),'play',$id,$selected);
     }
     tk_finish_and_advance($g,$id,$burn);
 }
