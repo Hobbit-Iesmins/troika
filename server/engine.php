@@ -5,14 +5,32 @@ declare(strict_types=1);
 function tk_id(): string { return bin2hex(random_bytes(12)); }
 function tk_now(): float { return microtime(true); }
 function tk_require(bool $condition, string $message): void { if (!$condition) throw new RuntimeException($message); }
+/** Settings are fixed at table creation. Old saved tables use the standard setup. */
+function tk_settings(array $settings=[]): array {
+    $mode=array_key_exists('mode',$settings)?$settings['mode']:'standard';
+    tk_require(is_string($mode) && in_array($mode,['standard','expanded'],true),'Choose Standard or Expanded mode.');
+    $capacity=array_key_exists('maxPlayers',$settings)?$settings['maxPlayers']:($mode==='standard'?5:9);
+    $decks=array_key_exists('decks',$settings)?$settings['decks']:($mode==='standard'?1:2);
+    tk_require(is_int($capacity) && is_int($decks),'Choose a whole number of seats and decks.');
+    if ($mode==='standard') tk_require($capacity===5 && $decks===1,'Standard mode uses five seats and one deck.');
+    else {
+        tk_require(in_array($capacity,[9,10,11,12],true),'Expanded mode has 9, 10, 11, or 12 seats.');
+        tk_require(in_array($decks,[2,3,4],true),'Expanded mode uses two, three, or four decks.');
+    }
+    tk_require($capacity*9<=$decks*52,'Twelve seats need 108 dealt cards. Choose three or four decks for a twelve-seat table.');
+    return ['mode'=>$mode,'maxPlayers'=>$capacity,'decks'=>$decks];
+}
+function tk_game_settings(array $g): array { return tk_settings($g['settings']??[]); }
 function tk_new_player(string $name, int $seat, bool $bot = false, string $tokenHash = ''): array {
     return ['id'=>tk_id(), 'name'=>$name, 'seat'=>$seat, 'bot'=>$bot, 'tokenHash'=>$tokenHash,
         'ready'=>$bot, 'lastSeen'=>tk_now(), 'hand'=>[], 'up'=>[], 'down'=>[], 'finish'=>null,
         'stats'=>['pickups'=>0,'burns'=>0]];
 }
-function tk_new_game(string $room, array $host): array {
+function tk_new_game(string $room, array $host, array $settings=[]): array {
+    $settings=tk_settings($settings);
+    tk_require(is_int($host['seat']) && $host['seat']>=0 && $host['seat']<$settings['maxPlayers'],'Choose a seat within this table.');
     $host['ready'] = true;
-    return ['room'=>$room,'status'=>'lobby','hostId'=>$host['id'],'players'=>[$host], 'turnId'=>null,
+    return ['room'=>$room,'status'=>'lobby','settings'=>$settings,'hostId'=>$host['id'],'players'=>[$host], 'turnId'=>null,
         'deck'=>[], 'pile'=>[], 'hole'=>[], 'openingRank'=>null,'results'=>[], 'events'=>[],
         'version'=>1,'eventSeq'=>0,'botAt'=>0,'updatedAt'=>tk_now(),'round'=>0];
 }
@@ -37,11 +55,19 @@ function tk_phase(array $p): string {
 function tk_rank_name(int $rank): string { return [11=>'J',12=>'Q',13=>'K',14=>'A'][$rank] ?? (string)$rank; }
 function tk_start(array &$g): void {
     tk_require($g['status']==='lobby', 'This table has already started.');
-    tk_require(count($g['players'])>=2 && count($g['players'])<=5,'Seat at least two players before dealing.');
+    $settings=tk_game_settings($g);
+    tk_require(count($g['players'])>=2 && count($g['players'])<=$settings['maxPlayers'],'Seat between two and '.$settings['maxPlayers'].' players before dealing.');
+    tk_require(count($g['players'])*9<=$settings['decks']*52,'There are not enough cards to deal nine cards to every player.');
+    $seats=[];
+    foreach ($g['players'] as $p) {
+        tk_require(is_int($p['seat']) && $p['seat']>=0 && $p['seat']<$settings['maxPlayers'],'A player is outside this table’s seat range.');
+        tk_require(!in_array($p['seat'],$seats,true),'Each player needs a separate seat.'); $seats[]=$p['seat'];
+    }
+    $g['settings']=$settings;
     foreach ($g['players'] as $p) tk_require($p['ready'], $p['name'].' must be ready before dealing.');
     usort($g['players'], fn($a,$b)=>$a['seat']<=>$b['seat']);
     $deck=[];
-    foreach (['S','H','D','C'] as $s) for ($r=2;$r<=14;$r++) $deck[]=['id'=>tk_id(),'rank'=>$r,'suit'=>$s];
+    for($copy=0;$copy<$settings['decks'];$copy++) foreach (['S','H','D','C'] as $s) for ($r=2;$r<=14;$r++) $deck[]=['id'=>tk_id(),'rank'=>$r,'suit'=>$s];
     // Fisher-Yates with the OS random source.
     for ($i=count($deck)-1;$i>0;$i--) { $j=random_int(0,$i); [$deck[$i],$deck[$j]]=[$deck[$j],$deck[$i]]; }
     foreach ($g['players'] as &$p) {
@@ -104,7 +130,7 @@ function tk_play(array &$g, string $id, string $source, array $ids): void {
     tk_require(in_array($source,['hand','up','down'],true),'Choose cards from your current phase.');
     tk_require(tk_phase($p)===$source,'Play your hand first, then face-up cards, then face-down cards.');
     tk_require($source==='hand' || !$g['deck'],'Finish drawing and playing your hand first.');
-    tk_require(count($ids)>0 && count($ids)<=4 && count(array_unique($ids))===count($ids),'Choose one or more matching cards.');
+    tk_require(count($ids)>0 && count($ids)<=4 && count(array_unique($ids))===count($ids),'Choose one to four matching cards.');
     tk_require($source!=='down' || count($ids)===1,'Reveal only one face-down card at a time.');
     $selected=[];
     foreach ($ids as $cid) {
@@ -177,11 +203,12 @@ function tk_bot_step(array &$g): bool {
         return (($n+$topRun>=4)?-100:0)+($c['rank']===6?20:($c['rank']===10?25:$c['rank']))-$n*1.5;
     };
     usort($legal,fn($a,$b)=>$score($a)<=>$score($b)); $rank=$legal[0]['rank'];
-    $ids=array_column(array_values(array_filter($cards,fn($c)=>$c['rank']===$rank)),'id');
+    // With several decks a rank can appear more than four times. Burn one group per turn.
+    $ids=array_slice(array_column(array_values(array_filter($cards,fn($c)=>$c['rank']===$rank)),'id'),0,4);
     tk_play($g,$p['id'],$source,$ids); return true;
 }
 function tk_view(array $g,string $youId): array {
-    $out=['room'=>$g['room'],'status'=>$g['status'],'hostId'=>$g['hostId'],'youId'=>$youId,
+    $out=['room'=>$g['room'],'status'=>$g['status'],'settings'=>tk_game_settings($g),'hostId'=>$g['hostId'],'youId'=>$youId,
         'players'=>[],'turnId'=>$g['turnId'],'deckCount'=>count($g['deck']),'pile'=>$g['pile'],
         'holeCount'=>count($g['hole']),'openingRank'=>$g['openingRank'],'results'=>$g['results'],
         'events'=>$g['events'],'version'=>$g['version'],'round'=>$g['round']];
