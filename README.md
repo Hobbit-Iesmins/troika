@@ -1,13 +1,13 @@
 # Troika
 
-A local-network card game for 2–5 players, with practice bots, private hands, selectable seats, and switchable table themes. No accounts, internet service, Composer, or Node.js are needed to run it.
+A local-network card game for 2–5 players in Standard mode, or up to 12 players in Expanded mode, with practice bots, private hands, selectable seats, and switchable table themes. No accounts, internet service, Composer, or Node.js are needed to run it.
 
 ## Run with MAMP
 
 1. Extract the `troika` folder into MAMP’s document root. Typical locations are `/Applications/MAMP/htdocs/troika` on macOS and `C:\MAMP\htdocs\troika` on Windows. You can also choose `troika` as a dedicated document root in MAMP.
 2. Select PHP 8.0 or newer and start Apache. PHP’s PDO SQLite extension must be enabled; it is normally included in MAMP. MySQL is not required.
 3. Open `http://localhost:8888/troika/` on the host computer, replacing `8888` with the Apache port shown in MAMP. If `troika` itself is your document root, omit `/troika/`.
-4. Enter a nickname, create a table, and choose your seat. Add bots to test alone, or invite friends to the same table using the room code.
+4. Enter a nickname, choose Standard or Expanded mode, and pick your seat before creating a table. Add bots to test alone, or invite friends to the same table using the room code.
 5. Other players open `http://YOUR-PRIVATE-IP:PORT/troika/` on the same network. For example: `http://192.168.1.50:8888/troika/`. They enter a nickname and the room code, then choose an open seat.
 6. When everyone is ready, the host starts the game.
 
@@ -15,11 +15,24 @@ Use the Apache port, not MAMP’s MySQL port. `localhost` only points to the dev
 
 For a quick PHP CLI launch outside MAMP, run `php -S 0.0.0.0:8080 -t .` from the `troika` folder and visit `http://localhost:8080/`. This is a development server for local testing.
 
+## Choose a table mode
+
+Before creating a table, the host chooses:
+
+| Mode | Table capacity | Decks |
+| --- | --- | --- |
+| Standard | 5 seats | One 52-card deck |
+| Expanded | 9, 10, 11, or 12 seats | 2, 3, or 4 decks |
+
+You do not need to fill every seat: a round can start with two ready players, and bots can occupy open seats. Every player still receives nine cards. A 12-seat table needs at least three decks because its deal uses 108 cards; two decks contain only 104. Selecting 12 seats raises the deck selection to three if needed and disables the two-deck option.
+
+The selected mode, capacity, and deck count stay fixed for the table and its rematches. Existing saved tables continue in Standard mode. Extra decks include repeated rank-and-suit faces, with each physical card tracked separately. Four consecutive matching ranks still burn the pile; play at most four matching cards in one action, then take the earned extra turn.
+
 ## Playing
 
 - Each player receives three face-down cards, three face-up cards, and three cards in hand. There is no pre-game swapping.
 - The player holding the lowest hand card starts by playing that rank. Ties use seat order. Suits never affect strength; ordinary ranks run from 2 up to ace.
-- On your turn, play one card or multiple cards of the same rank. The rank must be equal to or higher than the top card, except for the two special ranks below. You may pick up the playing pile instead and end your turn.
+- On your turn, play one card or up to four cards of the same rank. The rank must be equal to or higher than the top card, except for the two special ranks below. You may pick up the playing pile instead and end your turn.
 - **6 — reset:** playable on anything. The next player may play any rank.
 - **10 — burn:** playable on anything. The playing pile goes into the hole and you get another turn.
 - **Four matching ranks in a row — burn:** the entire pile goes into the hole. The player completing the run gets another turn. The four cards may have been played across several turns.
@@ -56,6 +69,6 @@ php tests/engine-test.php
 php tests/service-test.php
 ```
 
-The first checks rules and runs 32 complete automated matches across two to five players, verifying that all 52 cards remain accounted for after every move. The second checks seating, authorization, private hands, rollback, disconnected-player takeover, and rematches using an isolated in-memory SQLite database. The test suite needs PHP 8 with PDO SQLite. Neither suite touches saved tables.
+The first checks rules and automated matches, including card conservation in Standard and Expanded games. The second checks table settings, seating, authorization, private hands, rollback, disconnected-player takeover, and rematches using an isolated in-memory SQLite database. The test suite needs PHP 8 with PDO SQLite. Neither suite touches saved tables.
 
 For optional DOM integration checks, install `jsdom` into a separate development folder, then run `node tests/ui-test.cjs` with that folder’s `node_modules` in `NODE_PATH`. Set `PHP_BIN` if PHP is not on your command path. This suite connects the page’s actual event handlers to the PHP service through a CLI bridge and uses a temporary SQLite database; it does not launch a browser or web server. These tools are only needed for development, not for playing Troika.
