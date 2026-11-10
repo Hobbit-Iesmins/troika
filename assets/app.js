@@ -3,8 +3,8 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const store = {get(k){try{return localStorage.getItem('troika.'+k);}catch{return null;}},set(k,v){try{localStorage.setItem('troika.'+k,v);}catch{}},remove(k){try{localStorage.removeItem('troika.'+k);}catch{}}};
-  const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1};
-  let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2};
+  const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1,burnRule:'any'};
+  let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any'};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
   let pendingQuickPlay = null;
@@ -16,7 +16,8 @@
   const tableSettings = () => game?.settings || (joinMode ? lobbyPreview?.settings || STANDARD_SETUP : draftSettings);
   const capacity = () => tableSettings().maxPlayers;
   const seats = () => Array.from({length:capacity()},(_,i)=>i);
-  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'}`;
+  const allSuits = () => tableSettings().burnRule==='all_suits';
+  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'} · ${allSuits()?'All four suits':'Any four burn'}`;
   const me = () => game?.players.find(p => p.id === game.youId);
   const host = () => game && game.hostId === game.youId;
   const myTurn = () => game?.status === 'playing' && game.turnId === game.youId;
@@ -134,8 +135,8 @@
   }
   function renderEntry() {
     const setup=tableSettings();
-    const choices=!joinMode?`<label class="field-label">TABLE STYLE</label><div class="mode-picker" role="group" aria-label="Table style"><button type="button" id="mode-standard" data-mode-choice="standard" class="${draftSettings.mode==='standard'?'chosen':''}" aria-pressed="${draftSettings.mode==='standard'}"><strong>Standard</strong><small>5 seats · 1 deck</small></button><button type="button" id="mode-expanded" data-mode-choice="expanded" class="${draftSettings.mode==='expanded'?'chosen':''}" aria-pressed="${draftSettings.mode==='expanded'}"><strong>Expanded</strong><small>9–12 seats · 2–4 decks</small></button></div>${draftSettings.mode==='expanded'?`<div class="expanded-options"><label class="field-label" for="seat-count">TABLE SEATS<select id="seat-count">${[9,10,11,12].map(n=>`<option value="${n}" ${setup.maxPlayers===n?'selected':''}>${n} seats</option>`).join('')}</select></label><label class="field-label" for="deck-count">CARD DECKS<select id="deck-count">${[2,3,4].map(n=>`<option value="${n}" ${setup.decks===n?'selected':''} ${n===2&&setup.maxPlayers===12?'disabled':''}>${n} decks</option>`).join('')}</select></label></div><p class="setup-note" role="status">${setup.maxPlayers===12?'12 seats need at least 3 decks: the deal uses 108 cards.':'Each player gets 9 cards. Four matching ranks still burn the pile.'}</p>`:''}`:'<div id="join-settings" class="settings-summary">'+(lobbyPreview?esc(setupLabel()):'Enter a table code to see its settings.')+'</div>';
-    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
+    const choices=!joinMode?`<label class="field-label">TABLE STYLE</label><div class="mode-picker" role="group" aria-label="Table style"><button type="button" id="mode-standard" data-mode-choice="standard" class="${draftSettings.mode==='standard'?'chosen':''}" aria-pressed="${draftSettings.mode==='standard'}"><strong>Standard</strong><small>5 seats · 1 deck</small></button><button type="button" id="mode-expanded" data-mode-choice="expanded" class="${draftSettings.mode==='expanded'?'chosen':''}" aria-pressed="${draftSettings.mode==='expanded'}"><strong>Expanded</strong><small>9–12 seats · 2–4 decks</small></button></div>${draftSettings.mode==='expanded'?`<div class="expanded-options"><label class="field-label" for="seat-count">TABLE SEATS<select id="seat-count">${[9,10,11,12].map(n=>`<option value="${n}" ${setup.maxPlayers===n?'selected':''}>${n} seats</option>`).join('')}</select></label><label class="field-label" for="deck-count">CARD DECKS<select id="deck-count">${[2,3,4].map(n=>`<option value="${n}" ${setup.decks===n?'selected':''} ${n===2&&setup.maxPlayers===12?'disabled':''}>${n} decks</option>`).join('')}</select></label></div><p class="setup-note" role="status">${setup.maxPlayers===12?'12 seats need at least 3 decks: the deal uses 108 cards.':'Each player gets 9 cards. Choose below whether four-card burns require all suits.'}</p>`:''}`:'<div id="join-settings" class="settings-summary">'+(lobbyPreview?esc(setupLabel()):'Enter a table code to see its settings.')+'</div>';
+    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}${!joinMode?`<label class="field-label" for="burn-rule">FOUR-CARD BURN RULE</label><select id="burn-rule" class="secondary"><option value="any" ${draftSettings.burnRule!=='all_suits'?'selected':''}>Suits don’t matter — any four</option><option value="all_suits" ${draftSettings.burnRule==='all_suits'?'selected':''}>Suits matter — need ♠ ♥ ♦ ♣</option></select>`:''}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
   }
   function seatAttributes(seat) {
     const slot=capacity()>5 && game ? (seat-me().seat+capacity())%capacity() : seat;
@@ -144,6 +145,7 @@
     return `data-seat="${seat}" data-slot="${slot}" style="--seat-x:${(50-43*Math.sin(angle)).toFixed(3)}%;--seat-y:${(50+40*Math.cos(angle)).toFixed(3)}%"`;
   }
   function renderSeats() {
+    $('.four-rule').innerHTML=allSuits()?'<span>4×</span> Same rank, all four suits?<br><strong>♠ ♥ ♦ ♣ · Burn and go again.</strong>':'<span>4×</span> Four of a kind in a row?<br><strong>Any suits · Burn and go again.</strong>';
     document.body.dataset.tableSize=String(capacity());
     $('.board-wrap').classList.toggle('expanded-table',capacity()>5);
     if(!game)$('#table-badge').innerHTML='<span class="live-dot"></span> '+capacity()+' SEATS · '+tableSettings().decks+' '+(tableSettings().decks===1?'DECK':'DECKS');
@@ -231,7 +233,7 @@
       if(source==='hand'&&!legal(card)){toast(game.openingRank!==null?'Open with '+rankName(game.openingRank)+', the lowest hand card.':'Too low. Play an equal or higher card, use a 6 or 10, or pick up the pile.');return;}
       const first=cards.find(c=>selected.includes(c.id));
       if(selected.includes(id))selected=selected.filter(x=>x!==id);
-      else if(first&&first.rank===card.rank){if(selected.length===4){toast('Play up to four matching cards, then use the extra turn after the burn.');return;}selected.push(id);}
+      else if(first&&first.rank===card.rank){if(selected.length===4){toast('Play up to four matching cards per move. A qualifying burn earns another turn.');return;}selected.push(id);}
       else selected=[id];
     }
     if(source==='hand')paintHandSelection();else renderHand();
@@ -267,7 +269,7 @@
     // Four complete a burn; extra copies in Expanded mode stay for another play.
     const group=[card,...matches.filter(c=>c.id!==id)].slice(0,4);
     pendingQuickPlay={room:game.room,version:game.version,cardId:id,rank:card.rank,ids:group.map(c=>c.id)};
-    $('#matching-count').textContent='You have '+matches.length+' cards of rank '+rankName(card.rank)+' in your hand. '+(matches.length>4?'Play up to four now, then use your extra turn after the burn.':'Play only this card, or play the matching cards together.');
+    $('#matching-count').textContent='You have '+matches.length+' cards of rank '+rankName(card.rank)+' in your hand. '+(matches.length>4?'Play up to four now. A burn needs the table’s chosen suit rule.':'Play only this card, or play the matching cards together.');
     $('#matching-cards').innerHTML=group.map(c=>cardHTML(c)).join('');
     $('#quick-play-one').textContent='Play only '+rankName(card.rank)+suits[card.suit];
     $('#quick-play-group').textContent=matches.length===2?'Play both':matches.length<=4?'Play all '+matches.length:'Play 4 matching cards';
@@ -326,6 +328,7 @@
     if(e.target.id==='room-input'){draftRoom=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);e.target.value=draftRoom;lobbyPreview=null;if(draftRoom.length===5)previewLobby();}
   });
   document.addEventListener('change',e=>{
+    if(e.target.id==='burn-rule' && !game && !joinMode){draftSettings.burnRule=e.target.value;expandedSetup.burnRule=e.target.value;renderEntry();renderSeats();return;}
     if(e.target.id!=='seat-count' && e.target.id!=='deck-count')return;
     if(game || joinMode || draftSettings.mode!=='expanded')return;
     if(e.target.id==='seat-count')draftSettings.maxPlayers=Number(e.target.value);
@@ -349,7 +352,7 @@
     if(target.id==='sound-toggle'){sound=!sound;target.setAttribute('aria-label',sound?'Mute sound':'Enable sound');target.title=sound?'Mute sound':'Enable sound';$('.sound-off').hidden=sound;if(sound)tone('turn');return;}
     if(target.hasAttribute('data-copy')){copyInvite();return;}
     if(target.dataset.modeChoice){
-      draftSettings=target.dataset.modeChoice==='expanded'?{...expandedSetup}:{...STANDARD_SETUP};
+      draftSettings=target.dataset.modeChoice==='expanded'?{...expandedSetup,burnRule:draftSettings.burnRule||'any'}:{...STANDARD_SETUP,burnRule:draftSettings.burnRule||'any'};
       if(chosenSeat>=capacity())chosenSeat=0;
       renderEntry();renderSeats();return;
     }
