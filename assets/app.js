@@ -3,6 +3,8 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const store = {get(k){try{return localStorage.getItem('troika.'+k);}catch{return null;}},set(k,v){try{localStorage.setItem('troika.'+k,v);}catch{}},remove(k){try{localStorage.removeItem('troika.'+k);}catch{}}};
+  const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1};
+  let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
@@ -10,6 +12,10 @@
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
   const suits = {S:'♠',H:'♥',D:'♦',C:'♣'};
   const arrow = '<svg aria-hidden="true"><use href="#i-arrow"/></svg>';
+  const tableSettings = () => game?.settings || (joinMode ? lobbyPreview?.settings || STANDARD_SETUP : draftSettings);
+  const capacity = () => tableSettings().maxPlayers;
+  const seats = () => Array.from({length:capacity()},(_,i)=>i);
+  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'}`;
   const me = () => game?.players.find(p => p.id === game.youId);
   const host = () => game && game.hostId === game.youId;
   const myTurn = () => game?.status === 'playing' && game.turnId === game.youId;
@@ -109,7 +115,7 @@
     document.body.dataset.gameStatus='home';
     $('#page-label').textContent='The card room';$('#headline').textContent='Your table. Your rules.';
     $('#subtitle').textContent='A little strategy. A little luck. Just don’t be the last one holding cards.';
-    $('#table-badge').innerHTML='<span class="live-dot"></span> UP TO 5 PLAYERS';
+    $('#table-badge').innerHTML='<span class="live-dot"></span> '+capacity()+' SEATS · '+tableSettings().decks+' '+(tableSettings().decks===1?'DECK':'DECKS');
     $('#room-panel').innerHTML='<div class="room-tag"><small>COME AS YOU ARE</small><div style="font:17px Georgia,serif;line-height:1.5">Good cards.<br>Better company.</div></div>';
     $('#players-panel').innerHTML='';$('#activity').innerHTML='<p class="empty-feed">A fresh deck. A clean table.<br>The rest is up to you.</p>';
     $('#talk-feed').innerHTML='<p class="empty-feed">Join a table to see the cards played.</p>';
@@ -119,37 +125,51 @@
     $('#hand-panel').innerHTML='<div class="hand-heading"><strong>THE DEAL</strong><span>3 + 3 + 3</span></div><div class="welcome-hand"><div class="outline-cards"><span></span><span></span><span></span></div><p><strong>Three in your hand. Six on the table.</strong><br>Get rid of every card. Stay out of last place.</p></div>';
     renderEntry();renderSeats();setConnection(true,'LOCAL PLAY');
   }
+  function seatButtons() {
+    return seats().map(i=>`<button type="button" data-choose-seat="${i}" class="${chosenSeat===i?'chosen':''}" aria-label="Seat ${i+1}" aria-pressed="${chosenSeat===i}" ${lobbyPreview?.players.some(p=>p.seat===i)?'disabled':''}>${i+1}</button>`).join('');
+  }
   function renderEntry() {
-    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Host a table for your friends, or warm up against the bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}<label class="field-label">CHOOSE YOUR SEAT</label><div class="seat-picker" role="group" aria-label="Choose a table seat">${Array.from({length:5},(_,i)=>`<button type="button" data-choose-seat="${i}" class="${chosenSeat===i?'chosen':''}" aria-label="Seat ${i+1}" aria-pressed="${chosenSeat===i}" ${lobbyPreview?.players.some(p=>p.seat===i)?'disabled':''}>${i+1}</button>`).join('')}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
+    const setup=tableSettings();
+    const choices=!joinMode?`<label class="field-label">TABLE STYLE</label><div class="mode-picker" role="group" aria-label="Table style"><button type="button" id="mode-standard" data-mode-choice="standard" class="${draftSettings.mode==='standard'?'chosen':''}" aria-pressed="${draftSettings.mode==='standard'}"><strong>Standard</strong><small>5 seats · 1 deck</small></button><button type="button" id="mode-expanded" data-mode-choice="expanded" class="${draftSettings.mode==='expanded'?'chosen':''}" aria-pressed="${draftSettings.mode==='expanded'}"><strong>Expanded</strong><small>9–12 seats · 2–4 decks</small></button></div>${draftSettings.mode==='expanded'?`<div class="expanded-options"><label class="field-label" for="seat-count">TABLE SEATS<select id="seat-count">${[9,10,11,12].map(n=>`<option value="${n}" ${setup.maxPlayers===n?'selected':''}>${n} seats</option>`).join('')}</select></label><label class="field-label" for="deck-count">CARD DECKS<select id="deck-count">${[2,3,4].map(n=>`<option value="${n}" ${setup.decks===n?'selected':''} ${n===2&&setup.maxPlayers===12?'disabled':''}>${n} decks</option>`).join('')}</select></label></div><p class="setup-note" role="status">${setup.maxPlayers===12?'12 seats need at least 3 decks: the deal uses 108 cards.':'Each player gets 9 cards. Four matching ranks still burn the pile.'}</p>`:''}`:'<div id="join-settings" class="settings-summary">'+(lobbyPreview?esc(setupLabel()):'Enter a table code to see its settings.')+'</div>';
+    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
+  }
+  function seatAttributes(seat) {
+    const slot=capacity()>5 && game ? (seat-me().seat+capacity())%capacity() : seat;
+    if(capacity()===5)return `data-seat="${seat}" data-slot="${slot}"`;
+    const angle=2*Math.PI*slot/capacity();
+    return `data-seat="${seat}" data-slot="${slot}" style="--seat-x:${(50-43*Math.sin(angle)).toFixed(3)}%;--seat-y:${(50+40*Math.cos(angle)).toFixed(3)}%"`;
   }
   function renderSeats() {
+    document.body.dataset.tableSize=String(capacity());
+    $('.board-wrap').classList.toggle('expanded-table',capacity()>5);
+    if(!game)$('#table-badge').innerHTML='<span class="live-dot"></span> '+capacity()+' SEATS · '+tableSettings().decks+' '+(tableSettings().decks===1?'DECK':'DECKS');
     const players=game?.players || lobbyPreview?.players || [];
-    $('#seats').innerHTML=Array.from({length:5},(_,seat)=>{
+    $('#seats').innerHTML=seats().map(seat=>{
       const p=players.find(p=>p.seat===seat);
-      if(!p) return `<div class="seat" data-seat="${seat}"><button class="empty-seat ${!game&&chosenSeat===seat?'chosen':''}" data-seat-click="${seat}" aria-label="${game && host()?'Add bot at':'Choose'} seat ${seat+1}" ${game && (game.status!=='lobby'||!host()&&me()?.seat===seat)?'disabled':''}>+</button><span class="seat-caption">${!game&&chosenSeat===seat?'YOUR SPOT':game&&host()&&game.status==='lobby'?'ADD BOT':'SEAT '+(seat+1)}</span></div>`;
+      if(!p) return `<div class="seat" ${seatAttributes(seat)}><button class="empty-seat ${!game&&chosenSeat===seat?'chosen':''}" data-seat-click="${seat}" aria-label="${game && host()?'Add bot at':'Choose'} seat ${seat+1}" ${game && (game.status!=='lobby'||!host()&&me()?.seat===seat)?'disabled':''}>+</button><span class="seat-caption">${!game&&chosenSeat===seat?'YOUR SPOT':game&&host()&&game.status==='lobby'?'ADD BOT':'SEAT '+(seat+1)}</span></div>`;
       const self=Boolean(game && p.id===game.youId),active=Boolean(game && p.id===game.turnId);
       let reserves='';
       if(game && game.status!=='lobby') {
         if(p.up.length) reserves=p.up.map(c=>`<span class="reserve-stack">${p.downCount?backHTML():''}${cardHTML(c,{small:true,button:self&&p.phase==='up'&&myTurn(),source:'up',selectedCard:selected.includes(c.id)})}</span>`).join('');
         else reserves=(p.downSlots || []).map(id=>backHTML(id,self&&p.phase==='down'&&myTurn(),selected.includes(id))).join('');
       }
-      return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" data-seat="${seat}"><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+' IN HAND'}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
+      return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
     }).join('');
   }
   function renderPlayers() {
-    $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/5</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
+    $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/${capacity()}</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
   }
   function renderGame() {
     document.body.dataset.gameStatus=game.status;
     $('#page-label').textContent='Table '+game.room;$('#headline').textContent=game.status==='lobby'?'Good company starts here.':game.status==='finished'?'That’s a wrap.':'A little luck. A little nerve.';
     $('#subtitle').textContent=game.status==='lobby'?'Choose your seats. Invite your friends. Let the cards do the rest.':game.status==='finished'?'The cards have spoken. There’s always another round.':'Play it smart. Burn the pile. Get out before everyone else.';
-    $('#table-badge').innerHTML=`<span class="live-dot"></span> ${game.status==='lobby'?'LOBBY OPEN':'ROUND '+game.round}`;
+    $('#table-badge').innerHTML=`<span class="live-dot"></span> ${game.status==='lobby'?capacity()+' SEATS':'ROUND '+game.round} · ${tableSettings().decks} ${tableSettings().decks===1?'DECK':'DECKS'}`;
     $('#room-panel').innerHTML=`<div class="room-tag"><small>YOUR PRIVATE TABLE</small><div><span class="room-code">${esc(game.room)}</span><button class="icon-button" data-copy aria-label="Copy invitation link"><svg><use href="#i-copy"/></svg></button></div><button class="text-button" data-leave>Leave table ↗</button></div>`;
     renderPlayers();renderSeats();renderCenter();renderHand();renderControls();
     const feed=[...game.events].reverse().slice(0,14).map(eventHTML).join('');
     $('#activity').innerHTML=feed;
     $('#talk-feed').innerHTML=feed;
-    $('#talk-controls').innerHTML=`<span class="muted">TABLE ${esc(game.room)}</span><button class="secondary" data-copy>Copy invite link</button><button class="secondary" data-leave>Leave table</button>`;
+    $('#talk-controls').innerHTML=`<span class="muted">TABLE ${esc(game.room)} · ${esc(setupLabel())}</span><button class="secondary" data-copy>Copy invite link</button><button class="secondary" data-leave>Leave table</button>`;
   }
   function eventHTML(event) {
     // Old saved rounds may have text-only events. Never infer a hidden suit.
@@ -163,7 +183,7 @@
   }
   function renderCenter() {
     if(game.status==='lobby') {
-      $('#table-center').innerHTML=`<div class="welcome-cards">${backHTML()}${cardHTML({id:'x',rank:14,suit:'S'})}${cardHTML({id:'y',rank:10,suit:'D'})}</div><div class="center-word">The gang’s getting together.</div><div class="center-note">${game.players.length} OF 5 SEATS TAKEN · ${game.players.filter(p=>p.ready).length} READY</div>`;
+      $('#table-center').innerHTML=`<div class="welcome-cards">${backHTML()}${cardHTML({id:'x',rank:14,suit:'S'})}${cardHTML({id:'y',rank:10,suit:'D'})}</div><div class="center-word">The gang’s getting together.</div><div class="center-note">${game.players.length} OF ${capacity()} SEATS TAKEN · ${game.players.filter(p=>p.ready).length} READY</div>`;
       $('#turn-banner').textContent=host()?'Add a bot at any empty seat, or invite a friend.':'Click an empty seat to change your spot before the deal.';return;
     }
     if(game.status==='finished') {
@@ -190,7 +210,7 @@
     const p=me();if(!p)return;
     if(game.status==='lobby') {
       const allReady=game.players.every(p=>p.ready),count=game.players.length;
-      $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">TABLE ${esc(game.room)}</div><h2>${host()?'You’re the host.':'Make yourself at home.'}</h2><p>${host()?'Invite your lab mates, or fill the empty seats with bots.':'Take your seat and get ready. The host will deal when everyone is set.'}</p><div class="status-line"><span>Seats taken</span><strong>${count} / 5</strong></div><div class="status-line"><span>Players ready</span><strong>${game.players.filter(p=>p.ready).length} / ${count}</strong></div><label class="field-label">YOUR SEAT</label><div class="seat-picker" role="group" aria-label="Change your seat">${Array.from({length:5},(_,i)=>`<button type="button" data-move-seat="${i}" class="${p.seat===i?'chosen':''}" aria-label="Move to seat ${i+1}" aria-pressed="${p.seat===i}" ${game.players.some(x=>x.seat===i&&x.id!==p.id)?'disabled':''}>${i+1}</button>`).join('')}</div><div class="lobby-actions"><button class="${p.ready?'secondary':'primary'}" id="ready-button">${p.ready?'✓ You’re ready · undo':'I’m ready'} </button>${host()?`<button class="primary" id="start-button" ${count<2||!allReady?'disabled':''}>Deal the cards ${arrow}</button><button class="secondary" id="add-bot-button" ${count>=5?'disabled':''}>+ Add a practice bot</button>`:''}</div><div class="share-box"><button data-copy>Copy invite link ↗</button><span>${localhost()?'Share your private IP instead of localhost.':'Friends join on your local network.'}</span></div><p class="small-note">${count<2?'At least two players needed. Bots count.':!allReady?'Waiting for everyone to be ready.':'Everyone’s ready. Let’s play.'}</p><button class="text-button" data-leave>Leave this table</button></div>`;return;
+      $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">TABLE ${esc(game.room)}</div><h2>${host()?'You’re the host.':'Make yourself at home.'}</h2><p>${host()?'Invite your lab mates, or fill the empty seats with bots.':'Take your seat and get ready. The host will deal when everyone is set.'}</p><div class="status-line"><span>Seats taken</span><strong>${count} / ${capacity()}</strong></div><div class="status-line"><span>Players ready</span><strong>${game.players.filter(p=>p.ready).length} / ${count}</strong></div><div class="settings-summary">${esc(setupLabel())}</div><label class="field-label">YOUR SEAT</label><div class="seat-picker" role="group" aria-label="Change your seat">${seats().map(i=>`<button type="button" data-move-seat="${i}" class="${p.seat===i?'chosen':''}" aria-label="Move to seat ${i+1}" aria-pressed="${p.seat===i}" ${game.players.some(x=>x.seat===i&&x.id!==p.id)?'disabled':''}>${i+1}</button>`).join('')}</div><div class="lobby-actions"><button class="${p.ready?'secondary':'primary'}" id="ready-button">${p.ready?'✓ You’re ready · undo':'I’m ready'} </button>${host()?`<button class="primary" id="start-button" ${count<2||!allReady?'disabled':''}>Deal the cards ${arrow}</button><button class="secondary" id="add-bot-button" ${count>=capacity()?'disabled':''}>+ Add a practice bot</button>`:''}</div><div class="share-box"><button data-copy>Copy invite link ↗</button><span>${localhost()?'Share your private IP instead of localhost.':'Friends join on your local network.'}</span></div><p class="small-note">${count<2?'At least two players needed. Bots count.':!allReady?'Waiting for everyone to be ready.':'Everyone’s ready. Let’s play.'}</p><button class="text-button" data-leave>Leave this table</button></div>`;return;
     }
     if(game.status==='finished') {
       $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">THE FINAL WORD</div><h2>The pecking order.</h2>${game.results.map((id,i)=>{const player=game.players.find(x=>x.id===id);return `<div class="result-row"><span class="result-rank">${i+1}</span><div><strong>${esc(player?.name)}${id===game.youId?' · You':''}</strong><small>${i===game.results.length-1?'THE TROIKA':i===0?'FIRST OUT · NICELY PLAYED':'OUT IN '+ordinal(i+1).toUpperCase()+' PLACE'} · ${player?.stats.burns||0} burns · ${player?.stats.pickups||0} pickups</small></div></div>`;}).join('')}<div class="lobby-actions">${host()?'<button class="primary" id="rematch-button">Same seats. Fresh cards. ↻</button>':'<p>Waiting for the host to start a rematch.</p>'}<button class="secondary" data-leave>Leave table</button></div></div>`;return;
@@ -207,7 +227,7 @@
       if(source==='hand'&&!legal(card)){toast(game.openingRank!==null?'Open with '+rankName(game.openingRank)+', the lowest hand card.':'Too low. Play an equal or higher card, use a 6 or 10, or pick up the pile.');return;}
       const first=cards.find(c=>selected.includes(c.id));
       if(selected.includes(id))selected=selected.filter(x=>x!==id);
-      else if(first&&first.rank===card.rank)selected.push(id);
+      else if(first&&first.rank===card.rank){if(selected.length===4){toast('Play up to four matching cards, then use the extra turn after the burn.');return;}selected.push(id);}
       else selected=[id];
     }
     renderHand();renderSeats();
@@ -218,7 +238,10 @@
       const result=await request('lobby',{room:draftRoom},false);
       if(result.lobby.room!==draftRoom || game)return;
       lobbyPreview=result.lobby;
-      if(lobbyPreview.players.some(p=>p.seat===chosenSeat)){const open=Array.from({length:5},(_,i)=>i).find(i=>!lobbyPreview.players.some(p=>p.seat===i));if(open!==undefined)chosenSeat=open;}
+      if(chosenSeat>=capacity())chosenSeat=0;
+      if(lobbyPreview.players.some(p=>p.seat===chosenSeat)){const open=seats().find(i=>!lobbyPreview.players.some(p=>p.seat===i));if(open!==undefined)chosenSeat=open;}
+      $('#entry-seat-picker').innerHTML=seatButtons();
+      $('#join-settings').textContent=setupLabel();
       renderSeats();
       $$('.seat-picker button').forEach(b=>{b.disabled=lobbyPreview.players.some(p=>p.seat===Number(b.dataset.chooseSeat));b.classList.toggle('chosen',chosenSeat===Number(b.dataset.chooseSeat));b.setAttribute('aria-pressed',String(chosenSeat===Number(b.dataset.chooseSeat)));});
     } catch {lobbyPreview=null;renderSeats();}
@@ -231,12 +254,13 @@
     if(!draftName){$('#nickname').focus();return;}
     busy=true;document.body.classList.add('busy');
     try {
-      const result=await request(joinMode?'join':'create',{nickname:draftName,seat:chosenSeat,...(joinMode?{room:draftRoom}:{})},false);
+      const result=await request(joinMode?'join':'create',{nickname:draftName,seat:chosenSeat,...(joinMode?{room:draftRoom}:draftSettings)},false);
       saveCredentials(result);store.set('nickname',draftName);applyState(result.state);
       if(practice) {
-        const free=Array.from({length:5},(_,i)=>i).filter(i=>i!==chosenSeat);
-        for(const seat of [free[0],free[2]||free[1]]) {const result=await request('bot',{seat});applyState(result.state);}
-        const result=await request('start');applyState(result.state);toast('You’re playing against two bots. Good luck.');
+        const free=seats().filter(i=>i!==chosenSeat);
+        const botSeats=tableSettings().mode==='expanded'?free:[free[0],free[2]||free[1]];
+        for(const seat of botSeats) {const result=await request('bot',{seat});applyState(result.state);}
+        const result=await request('start');applyState(result.state);toast('You’re playing against '+botSeats.length+' bots. Good luck.');
       } else toast(joinMode?'You’re at the table. Get ready!':'Table’s open. Invite friends or add bots.');
     } catch(e) {
       if(!game){const el=$('#form-error');el.textContent=e.message;el.hidden=false;}else toast(e.message,true);
@@ -252,6 +276,16 @@
     if(e.target.id==='nickname')draftName=e.target.value;
     if(e.target.id==='room-input'){draftRoom=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);e.target.value=draftRoom;lobbyPreview=null;if(draftRoom.length===5)previewLobby();}
   });
+  document.addEventListener('change',e=>{
+    if(e.target.id!=='seat-count' && e.target.id!=='deck-count')return;
+    if(game || joinMode || draftSettings.mode!=='expanded')return;
+    if(e.target.id==='seat-count')draftSettings.maxPlayers=Number(e.target.value);
+    else draftSettings.decks=Number(e.target.value);
+    if(draftSettings.maxPlayers===12 && draftSettings.decks===2)draftSettings.decks=3;
+    expandedSetup={...draftSettings};
+    if(chosenSeat>=capacity())chosenSeat=0;
+    renderEntry();renderSeats();
+  });
   document.addEventListener('click',async e=>{
     const target=e.target.closest('button');if(!target)return;
     if(target.id==='talk-toggle'){$('#talk-dialog').showModal();return;}
@@ -262,6 +296,11 @@
     if(target.dataset.themeChoice){setTheme(target.dataset.themeChoice);$('#theme-menu').hidden=true;$('#theme-toggle').setAttribute('aria-expanded','false');return;}
     if(target.id==='sound-toggle'){sound=!sound;target.setAttribute('aria-label',sound?'Mute sound':'Enable sound');target.title=sound?'Mute sound':'Enable sound';$('.sound-off').hidden=sound;if(sound)tone('turn');return;}
     if(target.hasAttribute('data-copy')){copyInvite();return;}
+    if(target.dataset.modeChoice){
+      draftSettings=target.dataset.modeChoice==='expanded'?{...expandedSetup}:{...STANDARD_SETUP};
+      if(chosenSeat>=capacity())chosenSeat=0;
+      renderEntry();renderSeats();return;
+    }
     if(target.id==='mode-switch'){joinMode=!joinMode;lobbyPreview=null;renderEntry();renderSeats();if(joinMode){$('#room-input').focus();previewLobby();}return;}
     if(target.id==='practice-button'){enter(true);return;}
     if(busy)return;
@@ -275,7 +314,7 @@
     if(target.id==='pickup-button'){await act('pickup');selected=[];return;}
     if(target.id==='ready-button'){await act('ready',{ready:!me().ready});return;}
     if(target.id==='start-button'){await act('start');return;}
-    if(target.id==='add-bot-button'){const seat=Array.from({length:5},(_,i)=>i).find(i=>!game.players.some(p=>p.seat===i));if(seat!==undefined)await act('bot',{seat});return;}
+    if(target.id==='add-bot-button'){const seat=seats().find(i=>!game.players.some(p=>p.seat===i));if(seat!==undefined)await act('bot',{seat});return;}
     if(target.id==='rematch-button'){await act('rematch');return;}
     if(target.hasAttribute('data-leave')){const result=await act('leave');if(result?.left){$('#talk-dialog').close();clearCredentials();renderHome();toast('You left the table.');}return;}
   });
