@@ -228,7 +228,53 @@ try {
             check(count($g['results']) === $players && count(array_unique($g['results'])) === $players, 'all players receive unique finishing places');
         }
     }
-    echo 'PASS: ' . $checks . ' assertions; 32 complete bot matches (2–5 players).' . PHP_EOL;
+    // More decks create duplicate faces, but every physical card stays unique.
+    $expandedMatches = 0;
+    foreach ([9,10,11,12] as $players) {
+        foreach ([2,3,4] as $decks) {
+            if ($players === 12 && $decks === 2) continue;
+            $settings = ['mode'=>'expanded','maxPlayers'=>$players,'decks'=>$decks];
+            $g = tk_new_game('BIG'.$players.$decks, tk_new_player('Bot 0',0,true), $settings);
+            for ($i=1;$i<$players;$i++) $g['players'][]=tk_new_player('Bot '.$i,$i,true);
+            tk_start($g);
+            check(tk_view($g,$g['players'][0]['id'])['settings'] === $settings, 'expanded settings exposed without hidden deck faces');
+            check(count($g['deck']) === 52*$decks-9*$players, 'expanded deal leaves the correct draw count');
+            foreach ($g['players'] as $p) check(count($p['hand'])===3 && count($p['up'])===3 && count($p['down'])===3, 'expanded player gets three cards in each zone');
+            $all = allCards($g); $ids=array_column($all,'id'); sort($ids);
+            check(count($ids)===52*$decks && count(array_unique($ids))===52*$decks, 'every multi-deck card has its own opaque identity');
+            $faces=[]; foreach($all as $c) { $key=$c['rank'].$c['suit']; $faces[$key]=($faces[$key]??0)+1; }
+            check(count($faces)===52 && array_unique(array_values($faces))===[$decks], 'each face occurs once per selected deck');
+            $steps=0;
+            while($g['status']==='playing' && $steps<20000) {
+                tk_bot_step($g); $after=array_column(allCards($g),'id'); sort($after);
+                check($after===$ids, 'expanded move conserves all physical cards');
+                $steps++;
+            }
+            check($g['status']==='finished', 'expanded bot match completes: '.$players.' seats, '.$decks.' decks');
+            check(count($g['results'])===$players && count(array_unique($g['results']))===$players, 'expanded finish order contains every player once');
+            $expandedMatches++;
+        }
+    }
+    $g=fixture(); $g['settings']=['mode'=>'expanded','maxPlayers'=>9,'decks'=>2];
+    $g['players'][0]['bot']=true; $g['players'][0]['hand']=[];
+    for($i=0;$i<8;$i++) $g['players'][0]['hand'][]=card(13,'S');
+    $g['players'][0]['hand'][]=card(14,'H');
+    tk_bot_step($g);
+    check(count($g['hole'])===4 && count($g['players'][0]['hand'])===5, 'bot with eight matching copies plays at most four and burns');
+    check($g['turnId']===$g['players'][0]['id'], 'multi-deck four-card group still grants an extra turn');
+    tk_bot_step($g);
+    check(count($g['hole'])===8 && count($g['players'][0]['hand'])===1, 'bot can burn its second four-copy group on the extra turn');
+    $g=fixture(); $g['settings']=['mode'=>'expanded','maxPlayers'=>9,'decks'=>2];
+    $g['pile']=[card(13,'S'),card(13,'S'),card(13,'S')]; $g['players'][0]['hand'][0]=card(13,'S');
+    playFirst($g);
+    check(count($g['pile'])===0 && count($g['hole'])===4, 'four equal ranks burn even when their suits are identical deck copies');
+    $g=fixture(); $g['settings']=['mode'=>'expanded','maxPlayers'=>9,'decks'=>2];
+    $g['players'][0]['hand']=[];for($i=0;$i<5;$i++)$g['players'][0]['hand'][]=card(7,'D');
+    rejects(function()use(&$g){tk_play($g,$g['players'][0]['id'],'hand',array_column($g['players'][0]['hand'],'id'));}, 'five matching copies cannot bypass the four-card action limit');
+    $g=tk_new_game('OLD',tk_new_player('Old host',0,true)); $g['players'][]=tk_new_player('Old guest',1,true);unset($g['settings']);
+    check(tk_view($g,$g['hostId'])['settings']===['mode'=>'standard','maxPlayers'=>5,'decks'=>1], 'legacy saved games default to the original rules and capacity');
+    tk_start($g);check(count(allCards($g))===52,'legacy saved lobby can start with one deck');
+    echo 'PASS: ' . $checks . ' assertions; 32 standard and '.$expandedMatches.' expanded complete bot matches.' . PHP_EOL;
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL . $e->getTraceAsString() . PHP_EOL);
     exit(1);
