@@ -1,0 +1,143 @@
+/* Optional DOM integration suite. Requires Node.js, jsdom, PHP + PDO SQLite. */
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {spawnSync} = require('node:child_process');
+const {JSDOM, VirtualConsole} = require('jsdom');
+const source = path.resolve(__dirname, '..');
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'troika-ui-test-'));
+const php = process.env.PHP_BIN || 'php';
+const bridgePath = path.join(scratch, 'bridge.php');
+const bridge = "<?php\nrequire getenv('TROIKA_SOURCE').'/server/service.php';\ntry {\n    $input = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);\n    $db = tk_database();\n    if (isset($input['fixture'])) {\n        $q = $db->prepare('SELECT state FROM rooms WHERE code=?');\n        $q->execute([$input['room']]);\n        $g = json_decode($q->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);\n        $g['status'] = 'playing'; $g['deck'] = []; $g['pile'] = []; $g['hole'] = [];\n        $g['results'] = []; $g['openingRank'] = null; $g['turnId'] = $g['hostId']; $g['botAt'] = tk_now()+3600;\n        foreach ($g['players'] as &$p) {\n            $p['finish']=null; $p['hand']=[['id'=>tk_id(),'rank'=>4,'suit'=>'S'],['id'=>tk_id(),'rank'=>14,'suit'=>'C']];\n            $p['up']=[]; $p['down']=[];\n        } unset($p);\n        $i = tk_index($g,$g['hostId']); $p = &$g['players'][$i];\n        $ranks = $input['fixture'] === 'hand' ? [3,6,10,13,13,14] : [];\n        $p['hand']=[]; foreach($ranks as $r) $p['hand'][]=['id'=>tk_id(),'rank'=>$r,'suit'=>'S'];\n        if ($input['fixture'] !== 'down') foreach([2,7,12] as $r) $p['up'][]=['id'=>tk_id(),'rank'=>$r,'suit'=>'H'];\n        foreach([2,14,6] as $r) $p['down'][]=['id'=>tk_id(),'rank'=>$r,'suit'=>'D'];\n        $g['pile']=[['id'=>tk_id(),'rank'=>13,'suit'=>'C']];\n        if($input['fixture']==='finish') {\n            $g['status']='finished'; $g['turnId']=null; $g['results']=array_column($g['players'],'id');\n            foreach($g['players'] as $j=>&$p) {$p['finish']=$j+1;} unset($p);\n        }\n        tk_touch($g,'Fixture ready','test'); tk_save($db,$g);\n        echo json_encode(['state'=>tk_view($g,$g['hostId'])]);\n    } else echo json_encode(tk_dispatch($db,$input['request']));\n} catch(Throwable $e) { echo json_encode(['error'=>$e->getMessage()]); }\n";
+fs.writeFileSync(bridgePath, bridge);
+let count = 0;
+const check = (condition, label) => {assert.ok(condition, label); count++;};
+const call = payload => {
+  const out = spawnSync(php, [bridgePath], {input:JSON.stringify(payload), encoding:'utf8', env:{...process.env,TROIKA_SOURCE:source,TROIKA_DATA_DIR:path.join(scratch,'data')}});
+  if(out.status !== 0) throw new Error(out.stderr || out.stdout);
+  return JSON.parse(out.stdout);
+};
+const tick = () => new Promise(resolve => setImmediate(resolve));
+async function settle() {for(let i=0;i<5;i++) await tick();}
+function page(url='http://localhost:8888/troika/', stored={}) {
+  const errors=[], calls=[], timers=new Map(); let timerId=0, deferState=false, release=null;
+  const console = new VirtualConsole(); console.on('jsdomError', e=>errors.push(e));
+  const dom = new JSDOM(fs.readFileSync(path.join(source,'index.html'),'utf8'),{url,runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:console});
+  const w=dom.window;
+  Object.entries(stored).forEach(([k,v])=>w.localStorage.setItem(k,v));
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
+  w.setTimeout=(fn,delay)=>{const id=++timerId;timers.set(id,{fn,delay});return id;};
+  w.clearTimeout=id=>timers.delete(id);
+  w.fetch=async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    const result=call({request:body});
+    const response={ok:!result.error,json:async()=>result};
+    if(deferState&&body.action==='state'){deferState=false;return new Promise(resolve=>{release=()=>resolve(response);});}
+    return response;
+  };
+  w.eval(fs.readFileSync(path.join(source,'assets/app.js'),'utf8'));
+  return {w,dom,errors,calls,$:s=>w.document.querySelector(s),$$:s=>[...w.document.querySelectorAll(s)],
+    async click(s){const el=w.document.querySelector(s);assert.ok(el,'element exists: '+s);el.click();await settle();},
+    async poll(){const item=[...timers.entries()].find(([,t])=>t.delay===1000);assert.ok(item,'poll scheduled');timers.delete(item[0]);item[1].fn();await settle();},
+    defer(){deferState=true;},release(){assert.ok(release,'deferred state request exists');release();},
+    close(){dom.window.close();}
+  };
+}
+let p;
+(async()=>{
+  p=page(); await settle();
+  check(p.$$('#seats .seat').length===5,'five seats rendered on home');
+  await p.click('#theme-toggle');check(!p.$('#theme-menu').hidden,'theme menu opens');
+  for(const name of ['midnight','neon','classic','baltic']) {await p.click(`[data-theme-choice="${name}"]`);check(p.w.document.documentElement.dataset.theme===name,'theme switches: '+name);}
+  check(p.w.localStorage.getItem('troika.theme')==='baltic','theme preference saved');
+  await p.click('[data-rules]');check(p.$('#rules-dialog').open,'rules dialog opens');
+  await p.click('.close-dialog');check(!p.$('#rules-dialog').open,'rules dialog closes');
+  await p.click('[data-choose-seat="4"]');
+  p.$('#nickname').value='UI Tester';p.$('#nickname').dispatchEvent(new p.w.Event('input',{bubbles:true}));
+  await p.click('#practice-button');
+  check(p.calls.filter(x=>x.action==='bot').length===2,'practice adds two bots');
+  check(p.calls.some(x=>x.action==='start'),'practice starts the game');
+  check(p.$('#page-label').textContent.startsWith('Table '),'practice enters game table');
+  const room=p.w.localStorage.getItem('troika.lastRoom');
+  const credentials=JSON.parse(p.w.localStorage.getItem('troika.seat.'+room));
+  check(credentials.room===room&&credentials.token.length===48,'seat credentials saved');
+  check(p.$('[data-seat="4"]').classList.contains('is-self'),'chosen practice seat retained');
+  const fixture=async name=>{const result=call({fixture:name,room});assert.ok(!result.error);await p.poll();return result.state;};
+  let state=await fixture('hand');
+  check(p.$('#play-button').disabled,'play disabled until selection');
+  const self=()=>state.players.find(x=>x.id===state.youId);
+  const cardOf=rank=>self().hand.find(c=>c.rank===rank).id;
+  await p.click(`#hand-panel [data-card="${cardOf(3)}"]`);
+  check(p.$('#play-button').disabled&&p.$('#toast').textContent.includes('Too low'),'low hand card refused with explanation');
+  const kings=self().hand.filter(c=>c.rank===13);
+  await p.click(`#hand-panel [data-card="${kings[0].id}"]`);await p.click(`#hand-panel [data-card="${kings[1].id}"]`);
+  check(p.$$('#hand-panel [aria-pressed="true"]').length===2,'same ranks select together');
+  await p.click(`#hand-panel [data-card="${cardOf(14)}"]`);
+  check(p.$$('#hand-panel [aria-pressed="true"]').length===1,'different rank replaces selection');
+  await p.click(`#hand-panel [data-card="${cardOf(10)}"]`);await p.click('#play-button');
+  check(p.$('.pile-group:nth-child(2)>span').textContent==='PILE · 0','ten clears visible pile');
+  check(p.$('#hand-panel .hand-heading').textContent.includes('YOUR TURN'),'ten keeps player turn');
+  check(p.$('#play-button').disabled,'played selection cleared');
+  state=await fixture('hand');
+  p.defer();await p.poll();
+  await p.click(`#hand-panel [data-card="${cardOf(10)}"]`);await p.click('#play-button');
+  p.release();await settle();
+  check(p.$('.pile-group:nth-child(2)>span').textContent==='PILE · 0','older in-flight poll cannot undo completed play');
+  state=await fixture('hand');
+  await p.click('#pickup-button');
+  check(p.calls.at(-1).action==='pickup','pickup action reaches service');
+  check(p.$('.pile-group:nth-child(2)>span').textContent==='PILE · 0','pickup clears visible pile');
+  state=await fixture('up');
+  check(p.$('#hand-panel .hand-heading').textContent.includes('YOUR FACE-UP CARDS'),'face-up phase shown');
+  const upSelf=state.players.find(x=>x.id===state.youId), weak=upSelf.up.find(c=>c.rank===2);
+  await p.click(`#hand-panel [data-card="${weak.id}"]`);
+  check(p.$('#play-button').textContent.includes('Attempt & pick up'),'weak face-up card remains selectable as attempted pickup');
+  await p.click('#play-button');
+  check(p.$('#hand-panel .hand-heading').textContent.includes('YOUR HAND'),'failed face-up attempt returns to hand');
+  check(p.$$('.is-self .reserve-stack').length===2,'only attempted face-up card removed');
+  state=await fixture('down');
+  check(p.$('#hand-panel .hand-heading').textContent.includes('YOUR BLIND CARDS'),'blind phase shown');
+  const downSelf=state.players.find(x=>x.id===state.youId);
+  await p.click(`#hand-panel [data-card="${downSelf.downSlots[0]}"]`);
+  await p.click(`#hand-panel [data-card="${downSelf.downSlots[1]}"]`);
+  check(p.$$('#hand-panel [aria-pressed="true"]').length===1,'only one blind card can be selected');
+  await p.click('#play-button');
+  check(p.calls.at(-1).source==='down'&&p.calls.at(-1).cards.length===1,'blind attempt sends one card');
+  await fixture('finish');
+  check(p.$$('#control-panel .result-row').length===3,'finishing order shown for all players');
+  await p.click('#rematch-button');
+  check(p.$('#start-button')&&!p.$('#start-button').disabled,'rematch returns to ready lobby');
+  await p.click('[data-move-seat="3"]');
+  check(p.$('[data-seat="3"]').classList.contains('is-self'),'host can move seat in lobby');
+  await p.click('#ready-button');check(p.$('#start-button').disabled,'not-ready host blocks dealing');
+  await p.click('#ready-button');check(!p.$('#start-button').disabled,'ready toggle enables deal');
+  check(p.errors.length===0,'no DOM execution errors');
+  const guestPage=page('http://localhost:8888/troika/?room='+room);await settle();
+  check(guestPage.$('#room-input').value===room,'invitation pre-fills join room');
+  check(guestPage.$$('#seats .is-self').length===0&&guestPage.$$('#seats .active').length===0,'pre-join preview never marks occupied seats as self or active');
+  check(guestPage.$('[data-choose-seat="3"]').disabled,'preview disables host seat');
+  await guestPage.click('[data-choose-seat="4"]');
+  guestPage.$('#nickname').value='<b>Guest</b>';
+  guestPage.$('#entry-form').dispatchEvent(new guestPage.w.Event('submit',{bubbles:true,cancelable:true}));await settle();
+  check(guestPage.$('[data-seat="4"]').classList.contains('is-self'),'guest joins chosen available seat');
+  check(!guestPage.$('#add-bot-button')&&!guestPage.$('#start-button'),'guest has no host controls');
+  check(!guestPage.$('#players-panel b')&&guestPage.$('#players-panel').textContent.includes('<b>Guest</b>'),'nickname markup is displayed as text');
+  await guestPage.click('[data-move-seat="1"]');
+  check(guestPage.$('[data-seat="1"]').classList.contains('is-self'),'guest can move to another free seat');
+  await guestPage.click('#ready-button');
+  check(guestPage.$('#ready-button').textContent.includes('ready'),'guest ready control works');
+  check(guestPage.errors.length===0,'guest joins and seat changes without DOM errors');
+  await guestPage.click('[data-leave]');guestPage.close();
+  await p.poll();
+  const stored={};for(let i=0;i<p.w.localStorage.length;i++){const key=p.w.localStorage.key(i);stored[key]=p.w.localStorage.getItem(key);}
+  p.close();p=page('http://localhost:8888/troika/?room='+room,stored);await settle();
+  check(p.$('#page-label').textContent==='Table '+room,'saved token restores seat after reload');
+  await p.click('[data-leave]');
+  check(p.$('#practice-button')&&p.w.localStorage.getItem('troika.lastRoom')===null,'leave clears credentials and returns home');
+  check(p.errors.length===0,'rejoin and leave have no DOM execution errors');
+  p.close();p=null;
+  console.log('PASS: '+count+' DOM integration checks against real PHP/SQLite service.');
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{if(p)p.close();fs.rmSync(scratch,{recursive:true,force:true});});
