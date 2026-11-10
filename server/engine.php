@@ -18,7 +18,9 @@ function tk_settings(array $settings=[]): array {
         tk_require(in_array($decks,[2,3,4],true),'Expanded mode uses two, three, or four decks.');
     }
     tk_require($capacity*9<=$decks*52,'Twelve seats need 108 dealt cards. Choose three or four decks for a twelve-seat table.');
-    return ['mode'=>$mode,'maxPlayers'=>$capacity,'decks'=>$decks];
+    $rule=$settings['burnRule']??'any';
+    tk_require(is_string($rule) && in_array($rule,['any','all_suits'],true),'Choose Any four or All four suits for burns.');
+    return array_merge(['mode'=>$mode,'maxPlayers'=>$capacity,'decks'=>$decks],$rule==='any'?[]:['burnRule'=>$rule]);
 }
 function tk_game_settings(array $g): array { return tk_settings($g['settings']??[]); }
 function tk_new_player(string $name, int $seat, bool $bot = false, string $tokenHash = ''): array {
@@ -84,6 +86,24 @@ function tk_start(array &$g): void {
     $g['results']=[]; $g['turnId']=$starter; $g['botAt']=tk_now()+0.85; $g['round']++;
     $p=$g['players'][tk_index($g,$starter)];
     tk_touch($g,$p['name'].' opens with the lowest hand card: '.tk_rank_name($minimum).'.','deal',$starter);
+}
+/** Only the uninterrupted top run counts. Duplicate suits do not reset that run. */
+function tk_four_burn(array $pile,array $settings): bool {
+    if(count($pile)<4)return false;
+    $rank=$pile[count($pile)-1]['rank']; $run=[];
+    foreach(array_reverse($pile) as $c){if($c['rank']!==$rank)break;$run[]=$c;}
+    if(($settings['burnRule']??'any')==='all_suits')return count(array_unique(array_column($run,'suit')))===4;
+    return count($run)>=4;
+}
+function tk_bot_group(array $cards,int $rank,array $g): array {
+    $group=array_values(array_filter($cards,fn($c)=>$c['rank']===$rank));
+    if((tk_game_settings($g)['burnRule']??'any')==='all_suits'){
+        $seen=[]; foreach(array_reverse($g['pile']) as $c){if($c['rank']!==$rank)break;$seen[$c['suit']]=true;}
+        $preferred=[];$rest=[];
+        foreach($group as $c){if(!isset($seen[$c['suit']])){$preferred[]=$c;$seen[$c['suit']]=true;}else $rest[]=$c;}
+        $group=array_merge($preferred,$rest);
+    }
+    return array_slice($group,0,4);
 }
 function tk_sort_hand(array &$p): void { usort($p['hand'],fn($a,$b)=>($a['rank']<=>$b['rank']) ?: strcmp($a['suit'],$b['suit'])); }
 function tk_can_play(array $c, array $pile): bool {
@@ -156,15 +176,11 @@ function tk_play(array &$g, string $id, string $source, array $ids): void {
     $g['pile']=array_merge($g['pile'],$selected);
     unset($p);
     if ($source==='hand') tk_refill($g,$i);
-    $four=false;
-    if (count($g['pile'])>=4) {
-        $four=true;
-        foreach (array_slice($g['pile'],-4) as $c) if ($c['rank']!==$rank) $four=false;
-    }
+    $four=tk_four_burn($g['pile'],tk_game_settings($g));
     $burn=$rank===10 || $four;
     if ($burn) {
         $burned=count($g['pile']); $g['hole']=array_merge($g['hole'],$g['pile']); $g['pile']=[]; $g['players'][$i]['stats']['burns']++;
-        tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).'. '.($rank===10?'Ten burns':'Four of a kind burns').' '.$burned.' cards. Extra turn!','burn',$id,$selected);
+        tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).'. '.($rank===10?'Ten burns':((tk_game_settings($g)['burnRule']??'any')==='all_suits'?'All four suits burn':'Four of a kind burns')).' '.$burned.' cards. Extra turn!','burn',$id,$selected);
     } else {
         tk_touch($g,$name.' plays '.count($selected).' × '.tk_rank_name($rank).($rank===6?'. The pile is reset.':'.'),'play',$id,$selected);
     }
@@ -199,12 +215,12 @@ function tk_bot_step(array &$g): bool {
     // Save wild cards when an ordinary card works. Favor rank groups to shed cards.
     $score=function($c)use($cards,$g){
         $n=count(array_filter($cards,fn($x)=>$x['rank']===$c['rank']));
-        $topRun=0; foreach(array_reverse($g['pile']) as $pc) { if ($pc['rank']!==$c['rank']) break; $topRun++; }
-        return (($n+$topRun>=4)?-100:0)+($c['rank']===6?20:($c['rank']===10?25:$c['rank']))-$n*1.5;
+        $burn=tk_four_burn(array_merge($g['pile'],tk_bot_group($cards,$c['rank'],$g)),tk_game_settings($g));
+        return ($burn?-100:0)+($c['rank']===6?20:($c['rank']===10?25:$c['rank']))-$n*1.5;
     };
     usort($legal,fn($a,$b)=>$score($a)<=>$score($b)); $rank=$legal[0]['rank'];
     // With several decks a rank can appear more than four times. Burn one group per turn.
-    $ids=array_slice(array_column(array_values(array_filter($cards,fn($c)=>$c['rank']===$rank)),'id'),0,4);
+    $ids=array_column(tk_bot_group($cards,$rank,$g),'id');
     tk_play($g,$p['id'],$source,$ids); return true;
 }
 function tk_view(array $g,string $youId): array {
