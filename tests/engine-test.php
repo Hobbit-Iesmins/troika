@@ -65,6 +65,7 @@ try {
     playFirst($g);
     check(count($g['pile']) === 2 && end($g['pile'])['rank'] === 6, 'six stays in playing pile');
     check($g['turnId'] === $g['players'][1]['id'], 'six passes the turn');
+    check(end($g['events'])['cards'] === [['rank'=>6,'suit'=>'S']], 'reset event records the actual played card face');
 
     $g = fixture();
     $g['pile'] = [card(14), card(6), card(13)];
@@ -72,6 +73,7 @@ try {
     playFirst($g);
     check(count($g['pile']) === 0 && count($g['hole']) === 4, 'ten burns the complete pile including itself');
     check($g['turnId'] === $g['players'][0]['id'], 'ten grants another turn');
+    check(end($g['events'])['cards'] === [['rank'=>10,'suit'=>'S']], 'ten event retains the played face after the pile burns');
 
     $g = fixture();
     $g['pile'] = [card(2), card(13), card(13, 'H'), card(13, 'D')];
@@ -79,6 +81,7 @@ try {
     playFirst($g);
     check(count($g['pile']) === 0 && count($g['hole']) === 5, 'four equal cards in a row burn the complete pile');
     check($g['turnId'] === $g['players'][0]['id'], 'fourth equal card grants another turn');
+    check(end($g['events'])['cards'] === [['rank'=>13,'suit'=>'C']], 'four-card burn records only the new played card and its suit');
 
     $g = fixture();
     $g['pile'] = [card(13), card(13), card(6), card(13)];
@@ -87,9 +90,11 @@ try {
     check(count($g['pile']) === 5 && count($g['hole']) === 0, 'separated matching ranks do not burn');
 
     $g = fixture();
-    $g['players'][0]['hand'] = [card(4), card(4), card(14)];
+    $g['players'][0]['hand'] = [card(4, 'H'), card(4, 'D'), card(14)];
     tk_play($g, $g['players'][0]['id'], 'hand', array_column(array_slice($g['players'][0]['hand'], 0, 2), 'id'));
     check(count($g['pile']) === 2 && count($g['players'][0]['hand']) === 1, 'multiple equal hand cards form one turn');
+    check(end($g['events'])['cards'] === [['rank'=>4,'suit'=>'H'],['rank'=>4,'suit'=>'D']], 'group event preserves each played suit without identifiers');
+    check(tk_view($g,$g['players'][1]['id'])['events'] === $g['events'], 'opponent sees actual public played-card event faces');
     $g = fixture();
     rejects(function () use (&$g) { tk_play($g, $g['players'][0]['id'], 'hand', array_column($g['players'][0]['hand'], 'id')); }, 'mixed-rank move rejected');
 
@@ -126,6 +131,7 @@ try {
     check(count($g['players'][0]['hand']) === 3 && count($g['pile']) === 0, 'failed face-up attempt picks up only attempt plus pile');
     check(in_array($attemptId, array_column($g['players'][0]['hand'], 'id'), true), 'attempted face-up card enters hand');
     check($g['turnId'] === $g['players'][1]['id'], 'failed face-up attempt ends turn');
+    check(end($g['events'])['cards'] === [['rank'=>2,'suit'=>'S']], 'failed face-up event records only the attempted card');
 
     $g = fixture();
     $g['players'][0]['hand'] = [];
@@ -134,6 +140,7 @@ try {
     tk_play($g, $g['players'][0]['id'], 'up', array_column(array_slice($g['players'][0]['up'], 0, 2), 'id'));
     check(count($g['players'][0]['up']) === 1 && $g['players'][0]['up'][0]['rank'] === 7, 'multiple failed matching face-up attempts leave unselected card');
     check(count($g['players'][0]['hand']) === 3 && count($g['pile']) === 0, 'multiple failed matching face-up attempts take selected group plus pile');
+    check(count(end($g['events'])['cards']) === 2, 'failed face-up group exposes exactly its two attempted cards');
 
     $g = fixture();
     $g['players'][0]['hand'] = [];
@@ -141,6 +148,7 @@ try {
     $g['pile'] = [card(13)];
     playFirst($g, 'down');
     check(count($g['players'][0]['down']) === 2 && count($g['players'][0]['hand']) === 2, 'failed blind card takes itself and pile');
+    check(end($g['events'])['cards'] === [['rank'=>2,'suit'=>'S']], 'failed blind attempt reveals only its attempted face, excluding two remaining blind cards');
     $g = fixture();
     $g['players'][0]['hand'] = [];
     $g['players'][0]['down'] = [card(14), card(14), card(6)];
@@ -148,12 +156,14 @@ try {
     $g['pile'] = [card(13)];
     playFirst($g, 'down');
     check(count($g['players'][0]['down']) === 2 && count($g['players'][0]['hand']) === 0 && count($g['pile']) === 2, 'legal blind card plays directly');
+    check(end($g['events'])['cards'] === [['rank'=>14,'suit'=>'S']], 'successful blind attempt records its actual public face');
 
     $g = fixture();
     $g['pile'] = [card(8), card(9)];
     tk_pickup($g, $g['players'][0]['id']);
     check(count($g['players'][0]['hand']) === 4 && count($g['pile']) === 0, 'pickup takes full pile');
     check($g['turnId'] === $g['players'][1]['id'], 'pickup ends turn');
+    check(end($g['events'])['cards'] === [], 'ordinary pickup does not expose unplayed hand cards');
     $g = fixture();
     rejects(function () use (&$g) { tk_play($g, $g['players'][1]['id'], 'hand', [$g['players'][1]['hand'][0]['id']]); }, 'out-of-turn move rejected');
     rejects(function () use (&$g) { tk_play($g, $g['players'][0]['id'], 'hand', ['fake-card']); }, 'unowned card rejected');
@@ -178,6 +188,10 @@ try {
     check($g['turnId'] === $g['players'][1]['id'], 'finished player cannot retain an extra turn');
 
     $g = fixture();
+    check($g['events'][0]['cards'] === [], 'deal announcement does not predict a suit or expose undealt private card faces');
+    $legacyEvent = ['id'=>0,'text'=>'Existing saved-table event','type'=>'lobby','playerId'=>null];
+    array_unshift($g['events'],$legacyEvent);
+    check(tk_view($g,$g['players'][0]['id'])['events'][0] === $legacyEvent, 'saved events without card metadata remain compatible');
     $g['players'][0]['down'] = [card(7), card(13)];
     $g['players'][1]['down'] = [card(5)];
     $view = tk_view($g, $g['players'][0]['id']);
