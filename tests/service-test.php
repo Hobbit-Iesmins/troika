@@ -113,7 +113,54 @@ try {
     check($newHost['state']['hostId'] === $newHost['state']['youId'], 'new human inherits host at a table left with only bots');
     $newStart = request($db, 'start', ['room' => $host3['room'], 'token' => $newHost['token']]);
     check($newStart['state']['status'] === 'playing', 'new inherited host is ready and can start');
-    echo 'PASS: ' . $checks . ' service assertions (seats, authorization, privacy, rollback, reconnect takeover, rematch).' . PHP_EOL;
+    foreach ([
+        ['mode'=>'unknown'], ['mode'=>'expanded','maxPlayers'=>8,'decks'=>2],
+        ['mode'=>'expanded','maxPlayers'=>13,'decks'=>3], ['mode'=>'expanded','maxPlayers'=>'12','decks'=>3],
+        ['mode'=>'expanded','maxPlayers'=>12,'decks'=>2], ['mode'=>'expanded','maxPlayers'=>9,'decks'=>1],
+        ['mode'=>'expanded','maxPlayers'=>9,'decks'=>5], ['mode'=>'expanded','maxPlayers'=>9,'decks'=>'2'],
+        ['mode'=>'standard','maxPlayers'=>12,'decks'=>3], ['mode'=>'standard','maxPlayers'=>5,'decks'=>2],
+    ] as $config) rejects(fn()=>request($db,'create',[],array_merge(['nickname'=>'Bad config'],$config)), 'invalid or insufficient-card configuration rejected');
+    $settings=['mode'=>'expanded','maxPlayers'=>12,'decks'=>3];
+    $large=request($db,'create',[],array_merge(['nickname'=>'Māra','seat'=>11],$settings));
+    $lc=['room'=>$large['room'],'token'=>$large['token']];
+    check($large['state']['settings']===$settings && $large['state']['players'][0]['seat']===11, 'host creates expanded table and chooses twelfth seat');
+    $preview=request($db,'lobby',['room'=>$large['room']])['lobby'];
+    check($preview['settings']===$settings, 'join preview exposes room capacity and deck choice');
+    $largeGuest=request($db,'join',['room'=>$large['room']],['nickname'=>'Guest twelve','seat'=>10]);
+    $lgc=['room'=>$large['room'],'token'=>$largeGuest['token']];
+    check($largeGuest['state']['settings']===$settings, 'joiner inherits host settings');
+    rejects(fn()=>request($db,'seat',$lc,['seat'=>12]), 'expanded host cannot move past configured seat capacity');
+    rejects(fn()=>request($db,'join',['room'=>$large['room']],['nickname'=>'Outside','seat'=>12]), 'expanded guest cannot choose nonexistent thirteenth seat');
+    rejects(fn()=>request($db,'bot',$lgc,['seat'=>0]), 'expanded guests cannot add bots');
+    for($seat=0;$seat<10;$seat++) request($db,'bot',$lc,['seat'=>$seat]);
+    $largeLobby=request($db,'state',$lc)['state'];
+    check(count($largeLobby['players'])===12 && count(array_unique(array_column($largeLobby['players'],'name')))===12, 'twelve players including bots have unique names despite host-name collision');
+    rejects(fn()=>request($db,'bot',$lc,['seat'=>0]), 'thirteenth bot rejected');
+    rejects(fn()=>request($db,'join',['room'=>$large['room']],['nickname'=>'Thirteenth','seat'=>0]), 'thirteenth human rejected');
+    request($db,'ready',$lgc,['ready'=>true]);
+    $largeStart=request($db,'start',$lc)['state'];
+    check($largeStart['status']==='playing' && $largeStart['deckCount']===48, 'twelve players deal108 from three decks, leaving48');
+    foreach($largeStart['players'] as $p) check($p['handCount']===3 && count($p['up'])===3 && $p['downCount']===3 && ($p['id']===$largeStart['youId'] || $p['hand']===null), 'twelve-player deal keeps zones and privacy correct');
+    $persisted=loadGame($db,$large['room']);$all=$persisted['deck'];
+    foreach($persisted['players'] as $p) $all=array_merge($all,$p['hand'],$p['up'],$p['down']);
+    check(count($all)===156 && count(array_unique(array_column($all,'id')))===156, 'expanded service stores every physical card exactly once');
+    rejects(fn()=>request($db,'create',[],array_merge(['nickname'=>'Bad initial seat','seat'=>9],['mode'=>'expanded','maxPlayers'=>9,'decks'=>2])), 'initial seat validated against chosen capacity');
+    $persisted['status']='finished';$persisted['results']=array_column($persisted['players'],'id');tk_save($db,$persisted);
+    $largeRematch=request($db,'rematch',$lc)['state'];
+    check($largeRematch['status']==='lobby' && $largeRematch['settings']===$settings && count($largeRematch['players'])===12, 'rematch retains expanded capacity and deck settings');
+    // Sending create-only settings during normal commands cannot change a host's table.
+    $unchanged=request($db,'state',$lc,['mode'=>'standard','maxPlayers'=>5,'decks'=>1])['state'];
+    check($unchanged['settings']===$settings, 'settings remain immutable after creation');
+    $two=request($db,'create',[],['nickname'=>'Two decks','mode'=>'expanded','maxPlayers'=>11,'decks'=>2,'seat'=>10]);
+    $tc=['room'=>$two['room'],'token'=>$two['token']];
+    for($seat=0;$seat<10;$seat++)request($db,'bot',$tc,['seat'=>$seat]);
+    check(request($db,'start',$tc)['state']['deckCount']===5,'eleven-player two-deck match deals99 and leaves5');
+    $legacy=request($db,'create',[],['nickname'=>'Legacy host']);$legacyGame=loadGame($db,$legacy['room']);unset($legacyGame['settings']);tk_save($db,$legacyGame);
+    $legacyCredentials=['room'=>$legacy['room'],'token'=>$legacy['token']];
+    $default=['mode'=>'standard','maxPlayers'=>5,'decks'=>1];
+    check(request($db,'state',$legacyCredentials)['state']['settings']===$default && request($db,'lobby',['room'=>$legacy['room']])['lobby']['settings']===$default, 'legacy table settings default in private and public views');
+    rejects(fn()=>request($db,'bot',$legacyCredentials,['seat'=>5]),'legacy tables retain original five-seat limit');
+    echo 'PASS: ' . $checks . ' service assertions (standard/expanded settings, seats, authorization, privacy, rollback, reconnect takeover, rematch).' . PHP_EOL;
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL . $e->getTraceAsString() . PHP_EOL);
     exit(1);
