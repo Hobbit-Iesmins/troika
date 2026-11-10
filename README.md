@@ -29,6 +29,14 @@ For a quick PHP CLI launch outside MAMP, run `php -S 0.0.0.0:8080 -t .` from the
 - After a pickup, empty your hand before returning to your table cards.
 - Get rid of all your cards to finish. Play continues until one player remains; that player finishes last.
 
+## Table layout and Table Talk
+
+The table adapts to the available browser width and height, including when zooming to 130–150%. During a round, decorative content gives way to the table and hand controls. Large hands scroll within the hand area instead of pushing the play buttons down the page. On narrow screens, Table Talk is available from the speech-bubble button in the top bar.
+
+Table Talk shows each played or revealed card with its rank and suit, including grouped plays and cards that burn the pile. Hearts and diamonds use red symbols. Older saved events keep their original text without guessing a suit.
+
+To update an existing MAMP installation, replace the game files in the same folder and refresh the browser. The versioned CSS and JavaScript links load the updated interface. Matches remain in the separate SQLite storage folder.
+
 ## Local storage and reconnecting
 
 Your browser stores a private player token so refreshing or reopening the same page in the same browser restores your seat. Avoid clearing site data during a game. Each human should use their own device or a separate browser profile; opening another tab in the same browser continues the same player.
