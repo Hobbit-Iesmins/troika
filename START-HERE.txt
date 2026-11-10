@@ -3,12 +3,19 @@ TROIKA — LOCAL CARD CLUB
 1. Put this troika folder in MAMP's htdocs folder.
 2. Start Apache in MAMP with PHP 8 or newer (PDO SQLite enabled).
 3. Open http://localhost:8888/troika/ (use your MAMP Apache port).
-4. Enter a nickname, choose a seat, click Practice with bots.
+4. Enter a nickname, choose your table mode and seat, then click Practice with bots.
 
 To play with friends:
 Create a table instead. Friends open http://YOUR-PRIVATE-IP:PORT/troika/
 on the same local network, enter the table code, pick seats and get ready.
-Then the host clicks Deal the cards. Maximum five players.
+Then the host clicks Deal the cards.
+
+Before creating the table, the host chooses:
+- Standard: five seats and one deck.
+- Expanded: 9-12 seats and two, three, or four decks.
+  Twelve seats require at least three decks; the form handles this for you.
+A round only needs two ready players. Add bots to fill more seats if you like.
+The table keeps these settings for rematches. All house rules stay the same.
 
 No Node.js, Composer, MySQL or internet connection needed to play.
 Do not double-click index.html: open it through MAMP.
