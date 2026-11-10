@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="baltic">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101d1b"><meta name="description" content="Troika. A local card table for good company and bad hands. Play your Latvian house rules with friends or bots.">
+  <title>Troika — Your table. Your rules.</title>
+  <link rel="icon" type="image/svg+xml" href="assets/mark.svg"><link rel="stylesheet" href="assets/style.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body>
+<svg class="svg-defs" aria-hidden="true"><defs>
+  <symbol id="mark" viewBox="0 0 64 64"><path d="M32 5 58 50H6Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M32 18 47 44H17Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M32 31v23M13 45l13-8m25 8-13-8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="32" cy="32" r="3" fill="currentColor"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5V4Zm4 4c3 2 3 6 0 8m3-11c5 4 5 10 0 14"/></symbol>
+  <symbol id="i-skin" viewBox="0 0 24 24"><path d="M12 3C6 3 2 7 2 12s4 9 9 9h2c2 0 3-2 2-3-2-2-1-4 2-4h2c5-3 0-11-7-11Z"/><circle cx="7" cy="10" r="1"/><circle cx="11" cy="7" r="1"/><circle cx="16" cy="8" r="1"/></symbol>
+</defs></svg>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="Troika home"><svg><use href="#mark"/></svg><span>TROIKA<small>THE BALTIC CARD CLUB</small></span></a>
+    <div class="side-label">THE CLUBHOUSE</div>
+    <div class="nav-active"><span class="nav-icon">♧</span> Card table <span class="live-dot"></span></div>
+    <div id="room-panel" class="room-panel"></div>
+    <div id="players-panel" class="players-panel"></div>
+    <div class="activity-heading side-label">TABLE TALK <span>LIVE FEED</span></div>
+    <div id="activity" class="activity"><p class="empty-feed">A fresh deck. A clean table.<br>The rest is up to you.</p></div>
+    <div class="sidebar-bottom"><span class="local-dot"></span><div>Made for the same table.<small>Local network · No accounts</small></div></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="breadcrumb">CLUBHOUSE <span>/</span> <strong id="page-label">The card room</strong></div><div class="top-actions"><span id="connection" class="connection"><i></i> LOCAL PLAY</span><button id="sound-toggle" class="icon-button" aria-label="Enable sound" title="Enable sound"><svg><use href="#i-sound"/></svg><span class="sound-off">/</span></button><div class="theme-wrap"><button id="theme-toggle" class="icon-button" aria-label="Change table theme" title="Table themes" aria-expanded="false"><svg><use href="#i-skin"/></svg></button><div id="theme-menu" class="theme-menu" hidden></div></div><button class="rules-button" data-rules>How to play <span>↗</span></button></div></header>
+    <div class="content-heading"><div><div class="eyebrow">GOOD COMPANY. BAD HANDS.</div><h1 id="headline">Your table. Your rules.</h1><p id="subtitle">A little strategy. A little luck. Just don’t be the last one holding cards.</p></div><div id="table-badge" class="table-badge"><span class="live-dot"></span> UP TO 5 PLAYERS</div></div>
+    <div class="play-layout">
+      <section class="table-column" aria-label="Card table">
+        <div class="board-wrap"><div class="board-rail"></div><div class="felt"><div class="felt-border"></div><div class="felt-ring"></div><div class="table-watermark"><svg><use href="#mark"/></svg><span>T R O I K A</span></div></div><div id="seats"></div><div id="table-center" class="table-center"></div><div id="turn-banner" class="turn-banner"></div></div>
+        <div id="hand-panel" class="hand-panel"></div>
+        <div class="table-footer"><span>♠ &nbsp; ♥ &nbsp; ♣ &nbsp; ♦</span><p>Three down. Three up. Everything to play for.</p><button data-rules>House rules ↗</button></div>
+      </section>
+      <aside class="right-rail"><div id="control-panel"></div><div class="specials-panel"><div class="eyebrow">A FEW CARDS CHANGE EVERYTHING</div><div class="special-row"><div class="mini-special">6<span>↺</span></div><div><strong>The reset</strong><p>Play on anything. Any rank follows.</p></div></div><div class="special-row"><div class="mini-special ten">10<span>✧</span></div><div><strong>The burn</strong><p>Clear the pile. Go again.</p></div></div><div class="four-rule"><span>4×</span> Four of a kind in a row?<br><strong>Burn the pile. Take another turn.</strong></div></div><div class="house-note"><span>✦</span><p>Latvian house rules.<br>No swaps. No shortcuts.</p></div></aside>
+    </div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="rules-dialog"><div class="dialog-heading"><div><div class="eyebrow">THE WAY WE PLAY</div><h2>Troika house rules</h2></div><button class="icon-button close-dialog" aria-label="Close rules">×</button></div><div class="rules-content"><p>Get rid of every card. The last player holding cards is the Troika.</p><ol><li><strong>Three down. Three up. Three in hand.</strong> Play your hand first, then face-up cards, then blind cards one by one. No pre-game swaps.</li><li><strong>Lowest hand card opens.</strong> Ties go to the lowest numbered seat. Play an equal or higher rank. Suits don’t matter. You may play several cards of one rank in a single turn.</li><li><strong>Keep three in hand.</strong> After playing, draw back to at least three while the deck has cards. Table cards stay locked until the deck and your hand are empty.</li><li><strong>6 resets.</strong> Play it on any card. The next player can play any rank.</li><li><strong>10 burns.</strong> Play it on anything. The whole pile goes into the hole and you play again.</li><li><strong>Four equal cards in a row burn.</strong> Whoever completes the four clears the pile and takes another turn. Otherwise, one play per turn.</li><li><strong>Can’t beat it?</strong> Pick up the pile and your turn ends. With face-up cards, choose a card to attempt: if it’s too low, take only your attempted card(s) plus the pile. Other face-up cards stay put.</li><li><strong>The blind finish.</strong> Try one face-down card. If it’s too low, take that card and the pile into your hand. Clear your hand before trying another.</li></ol><div class="rank-strip">LOW &nbsp; 2 · 3 · 4 · 5 · 7 · 8 · 9 · J · Q · K · A &nbsp; HIGH</div><p class="muted">2–5 players · One 52-card deck · Clockwise turns by seat · 6 and 10 are always special (the opening play must still use the lowest dealt hand rank).</p></div><button class="primary close-dialog">Got it. Deal me in.</button></dialog>
+<noscript><div class="noscript">Troika needs JavaScript enabled to play.</div></noscript>
+</body></html>
