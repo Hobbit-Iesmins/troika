@@ -21,8 +21,17 @@ function tk_nickname($name): string {
     tk_require($length>=1 && $length<=20,'Use a nickname between 1 and 20 characters.');
     return $name;
 }
-function tk_seat($seat): int {
-    tk_require(is_int($seat) && $seat>=0 && $seat<5,'Choose a table seat from 1 to 5.'); return $seat;
+function tk_seat($seat,int $maxPlayers=5): int {
+    tk_require(is_int($seat) && $seat>=0 && $seat<$maxPlayers,'Choose a table seat from 1 to '.$maxPlayers.'.'); return $seat;
+}
+function tk_same_name(string $a,string $b): bool { return preg_match('/^'.preg_quote($a,'/').'$/iu',$b)===1; }
+function tk_bot_name(array $g,int $seat): string {
+    $names=['Māra','Rihards','Laima','Jānis','Dace','Artūrs','Elīna','Roberts','Līga','Edgars','Zane','Mārtiņš'];
+    $base=$names[$seat]; $name=$base; $suffix=1;
+    while(array_filter($g['players'],fn($p)=>tk_same_name($p['name'],$name))) {
+        $name=$base.' Bot'.($suffix===1?'':' '.$suffix); $suffix++;
+    }
+    return $name;
 }
 function tk_free_seat(array $g,int $seat,?string $ignoreId=null): void {
     foreach($g['players'] as $p) tk_require($p['seat']!==$seat || $p['id']===$ignoreId,'Someone has already taken that seat.');
@@ -45,14 +54,15 @@ function tk_dispatch(PDO $db,array $request): array {
     $db->exec('BEGIN IMMEDIATE');
     try {
         if ($action==='create') {
-            $name=tk_nickname($request['nickname']??null); $seat=tk_seat($request['seat']??0);
+            $settings=tk_settings(array_intersect_key($request,array_flip(['mode','maxPlayers','decks'])));
+            $name=tk_nickname($request['nickname']??null); $seat=tk_seat($request['seat']??0,$settings['maxPlayers']);
             $token=bin2hex(random_bytes(24)); $player=tk_new_player($name,$seat,false,hash('sha256',$token));
             do {
                 $code=''; $alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
                 for($n=0;$n<5;$n++) $code.=$alphabet[random_int(0,strlen($alphabet)-1)];
                 $q=$db->prepare('SELECT 1 FROM rooms WHERE code=?'); $q->execute([$code]);
             } while($q->fetchColumn());
-            $g=tk_new_game($code,$player); tk_touch($g,$name.' opened the table.','lobby',$player['id']); tk_save($db,$g);
+            $g=tk_new_game($code,$player,$settings); tk_touch($g,$name.' opened the table.','lobby',$player['id']); tk_save($db,$g);
             // Clean abandoned tables after seven days, without touching the active table.
             $q=$db->prepare('DELETE FROM rooms WHERE updated<?'); $q->execute([tk_now()-604800]);
             $db->exec('COMMIT'); return ['room'=>$code,'token'=>$token,'state'=>tk_view($g,$player['id'])];
@@ -63,10 +73,11 @@ function tk_dispatch(PDO $db,array $request): array {
         $q=$db->prepare('SELECT state FROM rooms WHERE code=?'); $q->execute([$room]); $raw=$q->fetchColumn();
         tk_require($raw!==false,'Table not found. Check the code or create a new table.');
         $g=json_decode($raw,true,512,JSON_THROW_ON_ERROR);
+        $g['settings']=tk_game_settings($g); $capacity=$g['settings']['maxPlayers'];
         if ($action==='join') {
-            tk_lobby($g); tk_require(count($g['players'])<5,'This table is full.');
-            $name=tk_nickname($request['nickname']??null); $seat=tk_seat($request['seat']??null); tk_free_seat($g,$seat);
-            foreach($g['players'] as $p) tk_require(strtolower($p['name'])!==strtolower($name),'That nickname is already seated here.');
+            tk_lobby($g); tk_require(count($g['players'])<$capacity,'This table is full.');
+            $name=tk_nickname($request['nickname']??null); $seat=tk_seat($request['seat']??null,$capacity); tk_free_seat($g,$seat);
+            foreach($g['players'] as $p) tk_require(!tk_same_name($p['name'],$name),'That nickname is already seated here.');
             $token=bin2hex(random_bytes(24)); $player=tk_new_player($name,$seat,false,hash('sha256',$token));
             if ($g['hostId']===null) { $g['hostId']=$player['id']; $player['ready']=true; }
             $g['players'][]=$player;
@@ -75,27 +86,26 @@ function tk_dispatch(PDO $db,array $request): array {
         }
         // A read-only public lobby view permits choosing an actually open seat before joining.
         if ($action==='lobby') {
-            $out=['room'=>$g['room'],'status'=>$g['status'],'players'=>array_map(fn($p)=>['name'=>$p['name'],'seat'=>$p['seat'],'bot'=>$p['bot']],$g['players'])];
+            $out=['room'=>$g['room'],'status'=>$g['status'],'settings'=>$g['settings'],'players'=>array_map(fn($p)=>['name'=>$p['name'],'seat'=>$p['seat'],'bot'=>$p['bot']],$g['players'])];
             $db->exec('COMMIT'); return ['lobby'=>$out];
         }
         $id=tk_auth($g,$request['token']??null); $i=tk_index($g,$id); $g['players'][$i]['lastSeen']=tk_now();
         switch($action) {
             case 'state': break;
             case 'seat':
-                tk_lobby($g); $seat=tk_seat($request['seat']??null); tk_free_seat($g,$seat,$id);
+                tk_lobby($g); $seat=tk_seat($request['seat']??null,$capacity); tk_free_seat($g,$seat,$id);
                 $g['players'][$i]['seat']=$seat; $g['players'][$i]['ready']=$id===$g['hostId'];
                 tk_touch($g,$g['players'][$i]['name'].' moved to seat '.($seat+1).'.','lobby',$id); break;
             case 'ready':
                 tk_lobby($g); tk_require(isset($request['ready']) && is_bool($request['ready']),'Choose ready or not ready.');
                 $g['players'][$i]['ready']=$request['ready']; tk_touch($g,$g['players'][$i]['name'].($request['ready']?' is ready.':' is not ready.'),'lobby',$id); break;
             case 'bot':
-                tk_host($g,$id); tk_lobby($g); tk_require(count($g['players'])<5,'This table is full.');
-                $seat=tk_seat($request['seat']??null); tk_free_seat($g,$seat);
-                $names=['Māra','Rihards','Laima','Jānis','Dace']; $name=$names[$seat];
-                $used=array_column($g['players'],'name'); if(in_array($name,$used,true)) $name.=' Bot';
+                tk_host($g,$id); tk_lobby($g); tk_require(count($g['players'])<$capacity,'This table is full.');
+                $seat=tk_seat($request['seat']??null,$capacity); tk_free_seat($g,$seat);
+                $name=tk_bot_name($g,$seat);
                 $bot=tk_new_player($name,$seat,true); $g['players'][]=$bot; tk_touch($g,$name.' (bot) joined seat '.($seat+1).'.','lobby',$bot['id']); break;
             case 'remove_bot':
-                tk_host($g,$id); tk_lobby($g); $seat=tk_seat($request['seat']??null); $found=false;
+                tk_host($g,$id); tk_lobby($g); $seat=tk_seat($request['seat']??null,$capacity); $found=false;
                 foreach($g['players'] as $j=>$p) if ($p['seat']===$seat) {
                     tk_require($p['bot'],'Only bot seats can be removed.'); array_splice($g['players'],$j,1); $found=true; tk_touch($g,$p['name'].' left the table.','lobby',$p['id']); break;
                 }
@@ -108,7 +118,7 @@ function tk_dispatch(PDO $db,array $request): array {
                 tk_play($g,$id,$request['source'],$request['cards']); break;
             case 'pickup': tk_pickup($g,$id); break;
             case 'replace_bot':
-                tk_host($g,$id); tk_require($g['status']==='playing','Bot takeover is available during a round.'); $seat=tk_seat($request['seat']??null); $found=false;
+                tk_host($g,$id); tk_require($g['status']==='playing','Bot takeover is available during a round.'); $seat=tk_seat($request['seat']??null,$capacity); $found=false;
                 foreach($g['players'] as &$p) if($p['seat']===$seat) {
                     tk_require(!$p['bot'] && $p['id']!==$id,'Choose a disconnected human player.');
                     tk_require(tk_now()-$p['lastSeen']>=30,'Wait 30 seconds after the player disconnects before using a bot.');
