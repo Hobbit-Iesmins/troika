@@ -42,6 +42,10 @@ The selected mode, capacity, and deck count stay fixed for the table and its rem
 - After a pickup, empty your hand before returning to your table cards.
 - Get rid of all your cards to finish. Play continues until one player remains; that player finishes last.
 
+## Quick card play
+
+Click cards once to select them, then use **Play card** as before. You can also double-click a playable card in your hand to play that specific card immediately. If other hand cards have the same rank, a small warning lets you play only the clicked card, play the matching group (up to four), or cancel. Suits do not affect the match. Face-up and blind cards still use the normal selection and Play button.
+
 ## Table layout and Table Talk
 
 The table adapts to the available browser width and height, including when zooming to 130–150%. During a round, decorative content gives way to the table and hand controls. Large hands scroll within the hand area instead of pushing the play buttons down the page. On narrow screens, Table Talk is available from the speech-bubble button in the top bar.
