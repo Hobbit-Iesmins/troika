@@ -106,11 +106,14 @@
     return !top || [6,10].includes(card.rank) || top.rank===6 || card.rank>=top.rank;
   }
   function renderHome() {
+    document.body.dataset.gameStatus='home';
     $('#page-label').textContent='The card room';$('#headline').textContent='Your table. Your rules.';
     $('#subtitle').textContent='A little strategy. A little luck. Just don’t be the last one holding cards.';
     $('#table-badge').innerHTML='<span class="live-dot"></span> UP TO 5 PLAYERS';
     $('#room-panel').innerHTML='<div class="room-tag"><small>COME AS YOU ARE</small><div style="font:17px Georgia,serif;line-height:1.5">Good cards.<br>Better company.</div></div>';
     $('#players-panel').innerHTML='';$('#activity').innerHTML='<p class="empty-feed">A fresh deck. A clean table.<br>The rest is up to you.</p>';
+    $('#talk-feed').innerHTML='<p class="empty-feed">Join a table to see the cards played.</p>';
+    $('#talk-controls').innerHTML='';
     $('#table-center').innerHTML=`<div class="welcome-cards">${cardHTML({id:'a',rank:14,suit:'S'})}${cardHTML({id:'b',rank:10,suit:'D'})}${cardHTML({id:'c',rank:6,suit:'C'})}</div><div class="center-word">There’s a seat for you.</div><div class="center-note">BRING YOUR FRIENDS. LEAVE YOUR CARDS.</div>`;
     $('#turn-banner').textContent='Pick your spot. Make yourself at home.';
     $('#hand-panel').innerHTML='<div class="hand-heading"><strong>THE DEAL</strong><span>3 + 3 + 3</span></div><div class="welcome-hand"><div class="outline-cards"><span></span><span></span><span></span></div><p><strong>Three in your hand. Six on the table.</strong><br>Get rid of every card. Stay out of last place.</p></div>';
@@ -137,12 +140,26 @@
     $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/5</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
   }
   function renderGame() {
+    document.body.dataset.gameStatus=game.status;
     $('#page-label').textContent='Table '+game.room;$('#headline').textContent=game.status==='lobby'?'Good company starts here.':game.status==='finished'?'That’s a wrap.':'A little luck. A little nerve.';
     $('#subtitle').textContent=game.status==='lobby'?'Choose your seats. Invite your friends. Let the cards do the rest.':game.status==='finished'?'The cards have spoken. There’s always another round.':'Play it smart. Burn the pile. Get out before everyone else.';
     $('#table-badge').innerHTML=`<span class="live-dot"></span> ${game.status==='lobby'?'LOBBY OPEN':'ROUND '+game.round}`;
     $('#room-panel').innerHTML=`<div class="room-tag"><small>YOUR PRIVATE TABLE</small><div><span class="room-code">${esc(game.room)}</span><button class="icon-button" data-copy aria-label="Copy invitation link"><svg><use href="#i-copy"/></svg></button></div><button class="text-button" data-leave>Leave table ↗</button></div>`;
     renderPlayers();renderSeats();renderCenter();renderHand();renderControls();
-    $('#activity').innerHTML=[...game.events].reverse().slice(0,14).map(e=>`<div class="event ${esc(e.type)}">${esc(e.text)}</div>`).join('');
+    const feed=[...game.events].reverse().slice(0,14).map(eventHTML).join('');
+    $('#activity').innerHTML=feed;
+    $('#talk-feed').innerHTML=feed;
+    $('#talk-controls').innerHTML=`<span class="muted">TABLE ${esc(game.room)}</span><button class="secondary" data-copy>Copy invite link</button><button class="secondary" data-leave>Leave table</button>`;
+  }
+  function eventHTML(event) {
+    // Old saved rounds may have text-only events. Never infer a hidden suit.
+    const cards=(Array.isArray(event.cards)?event.cards:[]).filter(card =>
+      card && typeof card==='object' && Number.isInteger(card.rank) && card.rank>=2 && card.rank<=14 && typeof card.suit==='string' && Object.hasOwn(suits,card.suit));
+    const badges=cards.map(card => {
+      const name=rankName(card.rank)+' of '+({S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[card.suit]);
+      return `<span class="event-card ${['H','D'].includes(card.suit)?'red':''}" role="listitem" aria-label="${name}"><span class="event-rank">${rankName(card.rank)}</span><span class="event-suit" aria-hidden="true">${suits[card.suit]}</span></span>`;
+    }).join('');
+    return `<div class="event ${esc(event.type)}"><div class="event-text">${esc(event.text)}</div>${badges?`<div class="event-cards" role="list" aria-label="Cards played or revealed">${badges}</div>`:''}</div>`;
   }
   function renderCenter() {
     if(game.status==='lobby') {
@@ -237,6 +254,8 @@
   });
   document.addEventListener('click',async e=>{
     const target=e.target.closest('button');if(!target)return;
+    if(target.id==='talk-toggle'){$('#talk-dialog').showModal();return;}
+    if(target.classList.contains('close-talk-dialog')){$('#talk-dialog').close();return;}
     if(target.hasAttribute('data-rules')){$('#rules-dialog').showModal();return;}
     if(target.classList.contains('close-dialog')){$('#rules-dialog').close();return;}
     if(target.id==='theme-toggle'){const menu=$('#theme-menu');menu.hidden=!menu.hidden;target.setAttribute('aria-expanded',String(!menu.hidden));return;}
@@ -258,7 +277,7 @@
     if(target.id==='start-button'){await act('start');return;}
     if(target.id==='add-bot-button'){const seat=Array.from({length:5},(_,i)=>i).find(i=>!game.players.some(p=>p.seat===i));if(seat!==undefined)await act('bot',{seat});return;}
     if(target.id==='rematch-button'){await act('rematch');return;}
-    if(target.hasAttribute('data-leave')){const result=await act('leave');if(result?.left){clearCredentials();renderHome();toast('You left the table.');}return;}
+    if(target.hasAttribute('data-leave')){const result=await act('leave');if(result?.left){$('#talk-dialog').close();clearCredentials();renderHome();toast('You left the table.');}return;}
   });
   document.addEventListener('click',e=>{if(!e.target.closest('.theme-wrap')){$('#theme-menu').hidden=true;$('#theme-toggle').setAttribute('aria-expanded','false');}});
   $('#rules-dialog').addEventListener('click',e=>{if(e.target===$('#rules-dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
