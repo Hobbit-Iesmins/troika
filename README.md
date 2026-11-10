@@ -35,7 +35,7 @@ The selected mode, capacity, and deck count stay fixed for the table and its rem
 - On your turn, play one card or up to four cards of the same rank. The rank must be equal to or higher than the top card, except for the two special ranks below. You may pick up the playing pile instead and end your turn.
 - **6 — reset:** playable on anything. The next player may play any rank.
 - **10 — burn:** playable on anything. The playing pile goes into the hole and you get another turn.
-- **Four matching ranks in a row — burn:** the entire pile goes into the hole. The player completing the run gets another turn. The four cards may have been played across several turns.
+- **Four-card burn:** by default, any four consecutive matching ranks burn. With All four suits, the uninterrupted same-rank run must include ♠ ♥ ♦ ♣. The entire pile goes into the hole. The player completing the run gets another turn. The four cards may have been played across several turns.
 - After playing from your hand, draw back to at least three cards while cards remain in the draw deck.
 - Once the draw deck and your hand are empty, play your face-up cards directly. If your attempted face-up card is too low, take only that attempted card plus the playing pile into your hand. Other face-up cards stay in place. Multiple attempted cards must all have the same rank.
 - Once your hand and face-up cards are gone, choose one face-down card without looking. If it can be played, it goes onto the pile; otherwise take it and the pile into your hand.
@@ -71,8 +71,13 @@ From the game folder, run:
 ```sh
 php tests/engine-test.php
 php tests/service-test.php
+php tests/burn-rule-test.php
 ```
 
 The first checks rules and automated matches, including card conservation in Standard and Expanded games. The second checks table settings, seating, authorization, private hands, rollback, disconnected-player takeover, and rematches using an isolated in-memory SQLite database. The test suite needs PHP 8 with PDO SQLite. Neither suite touches saved tables.
 
 For optional DOM integration checks, install `jsdom` into a separate development folder, then run `node tests/ui-test.cjs` with that folder’s `node_modules` in `NODE_PATH`. Set `PHP_BIN` if PHP is not on your command path. This suite connects the page’s actual event handlers to the PHP service through a CLI bridge and uses a temporary SQLite database; it does not launch a browser or web server. These tools are only needed for development, not for playing Troika.
+
+## Four-card burn option
+
+Before creating any table, choose **Suits don’t matter — any four** (default), or **Suits matter — need ♠ ♥ ♦ ♣**. The latter requires every suit of the same rank in the uninterrupted top run. For example K♠ K♠ K♥ K♦ K♣ burns when the club arrives; four K♠ alone do not. A different rank breaks the run. The option stays fixed for the table and rematches and appears in lobby/invite settings. Ordinary comparisons still ignore suits, and 6 resets and 10 burns work as before.
