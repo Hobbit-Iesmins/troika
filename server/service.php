@@ -54,7 +54,7 @@ function tk_dispatch(PDO $db,array $request): array {
     $db->exec('BEGIN IMMEDIATE');
     try {
         if ($action==='create') {
-            $settings=tk_settings(array_intersect_key($request,array_flip(['mode','maxPlayers','decks'])));
+            $settings=tk_settings(array_intersect_key($request,array_flip(['mode','maxPlayers','decks','burnRule'])));
             $name=tk_nickname($request['nickname']??null); $seat=tk_seat($request['seat']??0,$settings['maxPlayers']);
             $token=bin2hex(random_bytes(24)); $player=tk_new_player($name,$seat,false,hash('sha256',$token));
             do {
