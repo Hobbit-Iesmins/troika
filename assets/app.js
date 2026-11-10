@@ -7,6 +7,7 @@
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
+  let pendingQuickPlay = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
   let draftName = store.get('nickname') || '', draftRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
@@ -59,6 +60,7 @@
     const url=new URL(location.href);url.searchParams.set('room',result.room);history.replaceState(null,'',url);
   }
   function clearCredentials() {
+    dismissMatching();
     if(credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
     const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);
@@ -67,6 +69,7 @@
     if(!state || (game && game.room===state.room && state.version<game.version)) return;
     const wasTurn=myTurn(), oldStatus=game?.status, oldPhase=currentSource(), wasOffline=$('#connection').classList.contains('offline');
     game=state; setConnection(true);
+    if(pendingQuickPlay && (game.room!==pendingQuickPlay.room || game.version!==pendingQuickPlay.version || !myTurn() || currentSource()!=='hand'))dismissMatching();
     if (!myTurn() || oldPhase !== currentSource()) selected=[];
     else {const p=me();const ids=currentSource()==='down'?p.downSlots:(p[currentSource()]||[]).map(c=>c.id);selected=selected.filter(id=>ids.includes(id));}
     const events=game.events || [], newest=events.at(-1)?.id || 0;
@@ -81,6 +84,7 @@
   }
   async function act(action,data={}) {
     if(busy) return;
+    dismissMatching();
     busy=true; document.body.classList.add('busy');
     try {const result=await request(action,data);if(result.state)applyState(result.state);return result;}
     catch(e){toast(e.message,true);}
@@ -100,7 +104,7 @@
     const tag=button?'button':'div';
     const classes=['card', ['H','D'].includes(card.suit)?'red':'',special,selectedCard?'selected':'',canPlay===true?'playable':canPlay===false?'unplayable':''].filter(Boolean).join(' ');
     const suit=suits[card.suit],r=rankName(card.rank),name=r+' '+({S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[card.suit]);
-    const attrs=button?` type="button" data-card="${esc(card.id)}" data-source="${source}" aria-label="${name}${canPlay===false?' — too low':''}" aria-pressed="${selectedCard}" ${disabled?'disabled':''}`:` role="img" aria-label="${name}"`;
+    const attrs=button?` type="button" ${source==='hand'?'title="Click to select. Double-click to play this card."':''} data-card="${esc(card.id)}" data-source="${source}" aria-label="${name}${canPlay===false?' — too low':''}" aria-pressed="${selectedCard}" ${disabled?'disabled':''}`:` role="img" aria-label="${name}"`;
     return `<${tag} class="${classes}"${attrs}><span class="corner">${r}<small>${suit}</small></span><span class="pip ${special?'special-pip':''}">${card.rank===6?'↺':card.rank===10?'✧':suit}</span>${special?`<span class="card-detail">${card.rank===6?'RESET':'BURN'}</span>`:''}<span class="corner bottom">${r}<small>${suit}</small></span></${tag}>`;
   }
   function backHTML(id=null,selectable=false,isSelected=false) {
@@ -203,7 +207,7 @@
     let cards=source==='down'?p.downSlots.map(id=>backHTML(id,turn,selected.includes(id))).join(''):(p[source]||[]).map(c=>cardHTML(c,{button:true,disabled:!turn,source,selectedCard:selected.includes(c.id),canPlay:turn?legal(c):null})).join('');
     const chosen=source==='down'?null:(p[source]||[]).find(c=>selected.includes(c.id));
     const fails=chosen&&!legal(chosen), label=source==='down'?'Try blind card':source==='up'&&fails?'Attempt & pick up':'Play '+(selected.length>1?selected.length+' cards':'card');
-    let hint=!turn?'Waiting for your turn':source==='down'?'Choose one. Trust your luck.':source==='up'?'Play from the table. Too low? Take only the attempted card + pile.':game.openingRank!==null?'You must open with '+rankName(game.openingRank):'Select matching cards to play together';
+    let hint=!turn?'Waiting for your turn':source==='down'?'Choose one. Trust your luck.':source==='up'?'Play from the table. Too low? Take only the attempted card + pile.':game.openingRank!==null?'You must open with '+rankName(game.openingRank):'Click to select matching cards · Double-click to play a card';
     $('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${source==='hand'?'YOUR HAND':source==='up'?'YOUR FACE-UP CARDS':'YOUR BLIND CARDS'} <span style="color:var(--muted)">· ${source==='hand'?p.handCount:source==='up'?p.up.length:p.downCount}</span></strong><span>${turn?'YOUR TURN':'HOLD TIGHT'}</span></div><div class="hand-area"><div class="hand-cards">${cards}</div><div class="hand-actions"><button class="primary" id="play-button" ${!turn||!selected.length?'disabled':''}>${label} ${arrow}</button>${source==='hand'?`<button class="secondary" id="pickup-button" ${!turn||!game.pile.length||game.openingRank!==null?'disabled':''}>Pick up pile (${game.pile.length})</button>`:''}</div></div><div class="small-note muted" id="hand-hint" aria-live="polite">${hint}</div>`;
   }
   function renderControls() {
@@ -230,7 +234,52 @@
       else if(first&&first.rank===card.rank){if(selected.length===4){toast('Play up to four matching cards, then use the extra turn after the burn.');return;}selected.push(id);}
       else selected=[id];
     }
-    renderHand();renderSeats();
+    if(source==='hand')paintHandSelection();else renderHand();
+    renderSeats();
+  }
+  function paintHandSelection() {
+    // Keep card nodes and focus intact between the two native clicks.
+    $('#hand-panel').querySelectorAll('[data-card][data-source="hand"]').forEach(button=>{
+      const isSelected=selected.includes(button.dataset.card);
+      button.classList.toggle('selected',isSelected);
+      button.setAttribute('aria-pressed',String(isSelected));
+    });
+    const button=$('#play-button');
+    button.disabled=!myTurn()||!selected.length;
+    button.innerHTML='Play '+(selected.length>1?selected.length+' cards':'card')+' '+arrow;
+  }
+  function dismissMatching() {
+    pendingQuickPlay=null;
+    if($('#matching-dialog').open)$('#matching-dialog').close();
+  }
+  async function playCards(source,ids) {
+    if(busy || !myTurn() || currentSource()!==source || !ids.length)return;
+    const result=await act('play',{source,cards:ids});
+    if(result){selected=[];renderHand();renderSeats();}
+  }
+  async function quickPlayCard(id) {
+    if(busy || !myTurn() || currentSource()!=='hand' || $('#matching-dialog').open)return;
+    const card=me().hand.find(c=>c.id===id);
+    if(!card)return;
+    if(!legal(card)){selectCard(id,'hand');return;}
+    const matches=me().hand.filter(c=>c.rank===card.rank);
+    if(matches.length===1){await playCards('hand',[id]);return;}
+    // Four complete a burn; extra copies in Expanded mode stay for another play.
+    const group=[card,...matches.filter(c=>c.id!==id)].slice(0,4);
+    pendingQuickPlay={room:game.room,version:game.version,cardId:id,rank:card.rank,ids:group.map(c=>c.id)};
+    $('#matching-count').textContent='You have '+matches.length+' cards of rank '+rankName(card.rank)+' in your hand. '+(matches.length>4?'Play up to four now, then use your extra turn after the burn.':'Play only this card, or play the matching cards together.');
+    $('#matching-cards').innerHTML=group.map(c=>cardHTML(c)).join('');
+    $('#quick-play-one').textContent='Play only '+rankName(card.rank)+suits[card.suit];
+    $('#quick-play-group').textContent=matches.length===2?'Play both':matches.length<=4?'Play all '+matches.length:'Play 4 matching cards';
+    $('#matching-dialog').showModal();
+  }
+  async function confirmQuickPlay(group) {
+    const pending=pendingQuickPlay;
+    if(!pending)return;
+    const ids=group?pending.ids:[pending.cardId];
+    const valid=!busy && myTurn() && currentSource()==='hand' && game.room===pending.room && game.version===pending.version && ids.every(id=>me().hand.some(c=>c.id===id && c.rank===pending.rank && legal(c)));
+    dismissMatching();
+    if(valid)await playCards('hand',ids);
   }
   async function previewLobby() {
     if(!joinMode||draftRoom.length!==5||game)return;
@@ -288,6 +337,9 @@
   });
   document.addEventListener('click',async e=>{
     const target=e.target.closest('button');if(!target)return;
+    if(target.id==='quick-play-one'){await confirmQuickPlay(false);return;}
+    if(target.id==='quick-play-group'){await confirmQuickPlay(true);return;}
+    if(target.id==='quick-play-cancel'||target.classList.contains('close-matching-dialog')){dismissMatching();return;}
     if(target.id==='talk-toggle'){$('#talk-dialog').showModal();return;}
     if(target.classList.contains('close-talk-dialog')){$('#talk-dialog').close();return;}
     if(target.hasAttribute('data-rules')){$('#rules-dialog').showModal();return;}
@@ -309,8 +361,11 @@
     if(target.dataset.moveSeat!==undefined){await act('seat',{seat:Number(target.dataset.moveSeat)});return;}
     if(target.dataset.removeBot!==undefined){await act('remove_bot',{seat:Number(target.dataset.removeBot)});return;}
     if(target.dataset.replaceBot!==undefined){await act('replace_bot',{seat:Number(target.dataset.replaceBot)});return;}
-    if(target.dataset.card){selectCard(target.dataset.card,target.dataset.source);return;}
-    if(target.id==='play-button'){const result=await act('play',{source:currentSource(),cards:[...selected]});if(result){selected=[];renderHand();renderSeats();}return;}
+    if(target.dataset.card){
+      if(target.dataset.source==='hand' && e.detail>1)return;
+      selectCard(target.dataset.card,target.dataset.source);return;
+    }
+    if(target.id==='play-button'){await playCards(currentSource(),[...selected]);return;}
     if(target.id==='pickup-button'){await act('pickup');selected=[];return;}
     if(target.id==='ready-button'){await act('ready',{ready:!me().ready});return;}
     if(target.id==='start-button'){await act('start');return;}
@@ -318,6 +373,13 @@
     if(target.id==='rematch-button'){await act('rematch');return;}
     if(target.hasAttribute('data-leave')){const result=await act('leave');if(result?.left){$('#talk-dialog').close();clearCredentials();renderHome();toast('You left the table.');}return;}
   });
+  document.addEventListener('dblclick',e=>{
+    const card=e.target.closest('#hand-panel button[data-card][data-source="hand"]');
+    if(!card || card.disabled)return;
+    e.preventDefault();
+    quickPlayCard(card.dataset.card);
+  });
+  $('#matching-dialog').addEventListener('close',()=>{pendingQuickPlay=null;});
   document.addEventListener('click',e=>{if(!e.target.closest('.theme-wrap')){$('#theme-menu').hidden=true;$('#theme-toggle').setAttribute('aria-expanded','false');}});
   $('#rules-dialog').addEventListener('click',e=>{if(e.target===$('#rules-dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
   function setTheme(name) {
