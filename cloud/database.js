@@ -48,7 +48,8 @@ function poolConfig(env = process.env) {
   let tls;
   const fs=require('node:fs'), path=require('node:path');
   const certificateFile=path.join(__dirname,'certs','supabase.crt');
-  const ca=env.DATABASE_CA_CERT || (fs.existsSync(certificateFile)?fs.readFileSync(certificateFile,'utf8'):null);
+  const supabaseHost=host.endsWith('.pooler.supabase.com')||host.endsWith('.supabase.co');
+  const ca=env.DATABASE_CA_CERT || (supabaseHost&&fs.existsSync(certificateFile)?fs.readFileSync(certificateFile,'utf8'):null);
   if(ca){
     const certificate=ca.replace(/\\n/g,'\n');
     if(!certificate.includes('-----BEGIN CERTIFICATE-----')||!certificate.includes('-----END CERTIFICATE-----'))throw new StorageError('DATABASE_CA_CERT must contain the public PEM CA certificate.','DB_CA_FORMAT');

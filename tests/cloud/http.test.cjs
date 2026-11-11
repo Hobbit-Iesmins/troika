@@ -55,3 +55,11 @@ test('Supabase public CA is used without URL overriding verification',()=>{
  assert.equal(config.ssl.ca,pem);assert.equal(config.ssl.rejectUnauthorized,true);assert.equal(new URL(config.connectionString).searchParams.has('sslmode'),false);
  assert.throws(()=>poolConfig({DATABASE_URL:'postgresql://db.example.test/postgres',DATABASE_CA_CERT:'not a PEM certificate'}),StorageError);
 });
+
+test('bundled public CA applies to Supabase, while other providers and local tests keep their own TLS configuration',()=>{
+ const {poolConfig}=require('../../cloud/database.js');
+ const c=poolConfig({DATABASE_URL:'postgresql://example@example.pooler.supabase.com:6543/postgres?sslmode=require'});
+ assert.match(c.ssl.ca,/BEGIN CERTIFICATE/);assert.equal(c.ssl.rejectUnauthorized,true);assert.equal(new URL(c.connectionString).searchParams.has('sslmode'),false);
+ assert.equal(poolConfig({DATABASE_URL:'postgresql://example@db.example.test/postgres'}).ssl,undefined);
+ assert.equal(new URL(poolConfig({DATABASE_URL:'postgresql://agent@127.0.0.1:55432/test?sslmode=disable'}).connectionString).searchParams.get('sslmode'),'disable');
+});

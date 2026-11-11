@@ -4,12 +4,52 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "public",
-  "regions": ["fra1"],
-  "functions": { "api/game.js": { "maxDuration": 15 } },
-  "rewrites": [{ "source": "/api.php", "destination": "/api/game" }],
+  "regions": [
+    "fra1"
+  ],
+  "functions": {
+    "api/game.js": {
+      "maxDuration": 15,
+      "includeFiles": "cloud/certs/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api.php",
+      "destination": "/api/game"
+    }
+  ],
   "headers": [
-    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-    { "source": "/(.*)", "headers": [{ "key": "X-Content-Type-Options", "value": "nosniff" }, { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }] }
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    }
   ]
 }
