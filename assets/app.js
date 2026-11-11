@@ -3,11 +3,11 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const store = {get(k){try{return localStorage.getItem('troika.'+k);}catch{return null;}},set(k,v){try{localStorage.setItem('troika.'+k,v);}catch{}},remove(k){try{localStorage.removeItem('troika.'+k);}catch{}}};
-  const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1,burnRule:'any'};
-  let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any'};
+  const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1,burnRule:'any',jumpIn:false};
+  let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
-  let pendingQuickPlay = null;
+  let pendingQuickPlay = null, pileHistoryOpen = false, replaySnapshot = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
   let draftName = store.get('nickname') || '', draftRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
@@ -17,10 +17,12 @@
   const capacity = () => tableSettings().maxPlayers;
   const seats = () => Array.from({length:capacity()},(_,i)=>i);
   const allSuits = () => tableSettings().burnRule==='all_suits';
-  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'} · ${allSuits()?'All four suits':'Any four burn'}`;
+  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'} · ${allSuits()?'All four suits':'Any four burn'}${tableSettings().jumpIn?' · Jump-ins on':''}`;
   const me = () => game?.players.find(p => p.id === game.youId);
   const host = () => game && game.hostId === game.youId;
-  const myTurn = () => game?.status === 'playing' && game.turnId === game.youId;
+  const myTurn = () => game?.status === 'playing' && !game.paused && game.turnId === game.youId;
+  const canJump = (id,source) => game?.status==='playing' && !game.paused && game.turnId!==game.youId && (game.jumpCards||[]).some(c=>c.id===id&&c.source===source);
+  const hasJump = () => game?.status==='playing' && !game.paused && (game.jumpCards||[]).length>0;
   const currentSource = () => me()?.phase || 'hand';
   const localhost = () => ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
   const initial = name => Array.from(name || '?')[0].toUpperCase();
@@ -62,6 +64,8 @@
   }
   function clearCredentials() {
     dismissMatching();
+    pileHistoryOpen=false;replaySnapshot=null;
+    ['scoreboard-dialog','replay-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
     if(credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
     const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);
@@ -69,10 +73,11 @@
   function applyState(state) {
     if(!state || (game && game.room===state.room && state.version<game.version)) return;
     const wasTurn=myTurn(), oldStatus=game?.status, oldPhase=currentSource(), wasOffline=$('#connection').classList.contains('offline');
+    if(game && (game.room!==state.room || game.round!==state.round))pileHistoryOpen=false;
     game=state; setConnection(true);
     if(pendingQuickPlay && (game.room!==pendingQuickPlay.room || game.version!==pendingQuickPlay.version || !myTurn() || currentSource()!=='hand'))dismissMatching();
-    if (!myTurn() || oldPhase !== currentSource()) selected=[];
-    else {const p=me();const ids=currentSource()==='down'?p.downSlots:(p[currentSource()]||[]).map(c=>c.id);selected=selected.filter(id=>ids.includes(id));}
+    if ((!myTurn() && !hasJump()) || oldPhase !== currentSource()) selected=[];
+    else {const p=me();const ids=currentSource()==='down'?p.downSlots:(p[currentSource()]||[]).map(c=>c.id);selected=selected.filter(id=>ids.includes(id) && (myTurn() || canJump(id,currentSource())));}
     const events=game.events || [], newest=events.at(-1)?.id || 0;
     const newEvents=lastEvent?events.filter(e=>e.id>lastEvent):[];
     if(newEvents.some(e=>e.type==='burn')) {
@@ -103,7 +108,8 @@
   function cardHTML(card,{button=false,small=false,disabled=false,source='',selectedCard=false,canPlay=null}={}) {
     const special=card.rank===6?'special-six':card.rank===10?'special-ten':'';
     const tag=button?'button':'div';
-    const classes=['card', ['H','D'].includes(card.suit)?'red':'',special,selectedCard?'selected':'',canPlay===true?'playable':canPlay===false?'unplayable':''].filter(Boolean).join(' ');
+    const jumpCard=button && canJump(card.id,source);
+    const classes=['card',jumpCard?'jump-playable':'', ['H','D'].includes(card.suit)?'red':'',special,selectedCard?'selected':'',canPlay===true?'playable':canPlay===false?'unplayable':''].filter(Boolean).join(' ');
     const suit=suits[card.suit],r=rankName(card.rank),name=r+' '+({S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[card.suit]);
     const attrs=button?` type="button" ${source==='hand'?'title="Click to select. Double-click to play this card."':''} data-card="${esc(card.id)}" data-source="${source}" aria-label="${name}${canPlay===false?' — too low':''}" aria-pressed="${selectedCard}" ${disabled?'disabled':''}`:` role="img" aria-label="${name}"`;
     return `<${tag} class="${classes}"${attrs}><span class="corner">${r}<small>${suit}</small></span><span class="pip ${special?'special-pip':''}">${card.rank===6?'↺':card.rank===10?'✧':suit}</span>${special?`<span class="card-detail">${card.rank===6?'RESET':'BURN'}</span>`:''}<span class="corner bottom">${r}<small>${suit}</small></span></${tag}>`;
@@ -117,7 +123,8 @@
     return !top || [6,10].includes(card.rank) || top.rank===6 || card.rank>=top.rank;
   }
   function renderHome() {
-    document.body.dataset.gameStatus='home';
+    document.body.dataset.gameStatus='home';document.body.dataset.paused='false';
+    $('#session-tools').hidden=true;
     $('#page-label').textContent='The card room';$('#headline').textContent='Your table. Your rules.';
     $('#subtitle').textContent='A little strategy. A little luck. Just don’t be the last one holding cards.';
     $('#table-badge').innerHTML='<span class="live-dot"></span> '+capacity()+' SEATS · '+tableSettings().decks+' '+(tableSettings().decks===1?'DECK':'DECKS');
@@ -136,7 +143,7 @@
   function renderEntry() {
     const setup=tableSettings();
     const choices=!joinMode?`<label class="field-label">TABLE STYLE</label><div class="mode-picker" role="group" aria-label="Table style"><button type="button" id="mode-standard" data-mode-choice="standard" class="${draftSettings.mode==='standard'?'chosen':''}" aria-pressed="${draftSettings.mode==='standard'}"><strong>Standard</strong><small>5 seats · 1 deck</small></button><button type="button" id="mode-expanded" data-mode-choice="expanded" class="${draftSettings.mode==='expanded'?'chosen':''}" aria-pressed="${draftSettings.mode==='expanded'}"><strong>Expanded</strong><small>9–12 seats · 2–4 decks</small></button></div>${draftSettings.mode==='expanded'?`<div class="expanded-options"><label class="field-label" for="seat-count">TABLE SEATS<select id="seat-count">${[9,10,11,12].map(n=>`<option value="${n}" ${setup.maxPlayers===n?'selected':''}>${n} seats</option>`).join('')}</select></label><label class="field-label" for="deck-count">CARD DECKS<select id="deck-count">${[2,3,4].map(n=>`<option value="${n}" ${setup.decks===n?'selected':''} ${n===2&&setup.maxPlayers===12?'disabled':''}>${n} decks</option>`).join('')}</select></label></div><p class="setup-note" role="status">${setup.maxPlayers===12?'12 seats need at least 3 decks: the deal uses 108 cards.':'Each player gets 9 cards. Choose below whether four-card burns require all suits.'}</p>`:''}`:'<div id="join-settings" class="settings-summary">'+(lobbyPreview?esc(setupLabel()):'Enter a table code to see its settings.')+'</div>';
-    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}${!joinMode?`<label class="field-label" for="burn-rule">FOUR-CARD BURN RULE</label><select id="burn-rule" class="secondary"><option value="any" ${draftSettings.burnRule!=='all_suits'?'selected':''}>Suits don’t matter — any four</option><option value="all_suits" ${draftSettings.burnRule==='all_suits'?'selected':''}>Suits matter — need ♠ ♥ ♦ ♣</option></select>`:''}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
+    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}${!joinMode?`<label class="field-label" for="burn-rule">FOUR-CARD BURN RULE</label><select id="burn-rule" class="secondary"><option value="any" ${draftSettings.burnRule!=='all_suits'?'selected':''}>Suits don’t matter — any four</option><option value="all_suits" ${draftSettings.burnRule==='all_suits'?'selected':''}>Suits matter — need ♠ ♥ ♦ ♣</option></select>`:''}${!joinMode?`<label class="option-toggle" for="jump-in"><input id="jump-in" type="checkbox" ${draftSettings.jumpIn?'checked':''}><span><strong>Jump-in burns</strong><small>Complete a burn out of turn and steal the next turn.</small></span></label>`:''}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
   }
   function seatAttributes(seat) {
     const slot=capacity()>5 && game ? (seat-me().seat+capacity())%capacity() : seat;
@@ -156,7 +163,7 @@
       const self=Boolean(game && p.id===game.youId),active=Boolean(game && p.id===game.turnId);
       let reserves='';
       if(game && game.status!=='lobby') {
-        if(p.up.length) reserves=p.up.map(c=>`<span class="reserve-stack">${p.downCount?backHTML():''}${cardHTML(c,{small:true,button:self&&p.phase==='up'&&myTurn(),source:'up',selectedCard:selected.includes(c.id)})}</span>`).join('');
+        if(p.up.length) reserves=p.up.map(c=>`<span class="reserve-stack">${p.downCount?backHTML():''}${cardHTML(c,{small:true,button:self&&p.phase==='up'&&(myTurn()||canJump(c.id,'up')),source:'up',selectedCard:selected.includes(c.id)})}</span>`).join('');
         else reserves=(p.downSlots || []).map(id=>backHTML(id,self&&p.phase==='down'&&myTurn(),selected.includes(id))).join('');
       }
       return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
@@ -166,16 +173,17 @@
     $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/${capacity()}</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
   }
   function renderGame() {
-    document.body.dataset.gameStatus=game.status;
+    document.body.dataset.gameStatus=game.status;document.body.dataset.paused=String(Boolean(game.paused));
     $('#page-label').textContent='Table '+game.room;$('#headline').textContent=game.status==='lobby'?'Good company starts here.':game.status==='finished'?'That’s a wrap.':'A little luck. A little nerve.';
     $('#subtitle').textContent=game.status==='lobby'?'Choose your seats. Invite your friends. Let the cards do the rest.':game.status==='finished'?'The cards have spoken. There’s always another round.':'Play it smart. Burn the pile. Get out before everyone else.';
     $('#table-badge').innerHTML=`<span class="live-dot"></span> ${game.status==='lobby'?capacity()+' SEATS':'ROUND '+game.round} · ${tableSettings().decks} ${tableSettings().decks===1?'DECK':'DECKS'}`;
     $('#room-panel').innerHTML=`<div class="room-tag"><small>YOUR PRIVATE TABLE</small><div><span class="room-code">${esc(game.room)}</span><button class="icon-button" data-copy aria-label="Copy invitation link"><svg><use href="#i-copy"/></svg></button></div><button class="text-button" data-leave>Leave table ↗</button></div>`;
-    renderPlayers();renderSeats();renderCenter();renderHand();renderControls();
+    renderPlayers();renderSeats();renderCenter();renderHand();renderControls();renderSessionTools();
+    if($('#scoreboard-dialog').open)renderScoreboard();
     const feed=[...game.events].reverse().slice(0,14).map(eventHTML).join('');
     $('#activity').innerHTML=feed;
     $('#talk-feed').innerHTML=feed;
-    $('#talk-controls').innerHTML=`<span class="muted">TABLE ${esc(game.room)} · ${esc(setupLabel())}</span><button class="secondary" data-copy>Copy invite link</button><button class="secondary" data-leave>Leave table</button>`;
+    $('#talk-controls').innerHTML=`<span class="muted">TABLE ${esc(game.room)} · ${esc(setupLabel())}</span><button class="secondary" data-copy>Copy invite link</button>${host()&&game.status==='playing'?`<button class="secondary" data-pause>${game.paused?'Resume table':'Pause table'}</button>`:''}<button class="secondary" data-leave>Leave table</button>`;
   }
   function eventHTML(event) {
     // Old saved rounds may have text-only events. Never infer a hidden suit.
@@ -198,19 +206,43 @@
       $('#turn-banner').textContent=host()?'Same seats, fresh cards? Start a rematch.':'Waiting for the host to set up a rematch.';return;
     }
     const top=game.pile.at(-1), active=game.players.find(p=>p.id===game.turnId);
-    $('#table-center').innerHTML=`<div class="table-status">${game.openingRank!==null?'LOWEST CARD OPENS · '+rankName(game.openingRank):!top?'OPEN TABLE · ANY RANK':top.rank===6?'RESET · ANY RANK':rankName(top.rank)+' OR HIGHER · 6 OR 10'}</div><div class="game-piles"><div class="pile-group"><div>${game.deckCount?`<div class="deck-stack">${backHTML()}</div>`:'<div class="pile-empty">∅</div>'}</div><span>DECK · ${game.deckCount}</span></div><div class="pile-group"><div>${game.pile.length?game.pile.slice(-3).map(c=>`<div class="pile-card">${cardHTML(c)}</div>`).join(''):'<div class="pile-empty">♧</div>'}</div><span>PILE · ${game.pile.length}</span></div><div class="pile-group hole-group"><div class="hole">✧</div><span>HOLE · ${game.holeCount}</span></div></div>`;
+    $('#table-center').innerHTML=`<div class="table-status">${game.openingRank!==null?'LOWEST CARD OPENS · '+rankName(game.openingRank):!top?'OPEN TABLE · ANY RANK':top.rank===6?'RESET · ANY RANK':rankName(top.rank)+' OR HIGHER · 6 OR 10'}</div><div class="game-piles"><div class="pile-group"><div>${game.deckCount?`<div class="deck-stack">${backHTML()}</div>`:'<div class="pile-empty">∅</div>'}</div><span>DECK · ${game.deckCount}</span></div><div class="pile-group pile-history-wrap ${pileHistoryOpen?'history-open':''}"><div><button id="pile-inspect" type="button" aria-label="Inspect the last 10 played cards" aria-controls="pile-history" aria-expanded="${pileHistoryOpen}">${game.pile.length?game.pile.slice(-3).map(c=>`<span class="pile-card">${cardHTML(c)}</span>`).join(''):'<span class="pile-empty">♧</span>'}</button></div><span>PILE · ${game.pile.length}</span>${historyHTML()}</div><div class="pile-group hole-group"><div class="hole">✧</div><span>HOLE · ${game.holeCount}</span></div></div>`;
     $('#turn-banner').innerHTML=game.openingRank!==null?`<span style="color:var(--gold)">${esc(active?.name)} opens with ${rankName(game.openingRank)}, the lowest hand card.</span>`:myTurn()?'<span style="color:var(--gold)">Your move. Make it a good one.</span>':`Waiting for ${esc(active?.name)}${active?.bot?' <span class="loading-dots">···</span>':''}`;
+    if(game.paused)$('#turn-banner').textContent='Table paused by the host. Cards and turns are frozen.';
   }
   function renderHand() {
     const p=me();if(!p)return;
-    if(game.status==='lobby'){$('#hand-panel').innerHTML='<div class="hand-heading"><strong>YOUR HAND</strong><span>WAITING FOR THE DEAL</span></div><div class="locked-hint">No swaps. You play the cards you’re dealt.<br>Get ready when you’re happy with your seat.</div>';return;}
-    if(p.finish){$('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${ordinal(p.finish).toUpperCase()} PLACE</strong><span>${game.status==='finished'?'ROUND COMPLETE':'YOU’RE OUT'}</span></div><div class="locked-hint">${p.finish===game.players.length?'The Troika this round. Time for a comeback.':'All clear. Sit back and watch the rest of the table.'}</div>`;return;}
-    const phase=p.phase, turn=myTurn(), source=phase==='out'?'hand':phase;
-    let cards=source==='down'?p.downSlots.map(id=>backHTML(id,turn,selected.includes(id))).join(''):(p[source]||[]).map(c=>cardHTML(c,{button:true,disabled:!turn,source,selectedCard:selected.includes(c.id),canPlay:turn?legal(c):null})).join('');
+    if(game.status==='lobby'){$('#hand-panel').classList.remove('jump-ready');$('#hand-panel').innerHTML='<div class="hand-heading"><strong>YOUR HAND</strong><span>WAITING FOR THE DEAL</span></div><div class="locked-hint">No swaps. You play the cards you’re dealt.<br>Get ready when you’re happy with your seat.</div>';return;}
+    if(p.finish){$('#hand-panel').classList.remove('jump-ready');$('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${ordinal(p.finish).toUpperCase()} PLACE</strong><span>${game.status==='finished'?'ROUND COMPLETE':'YOU’RE OUT'}</span></div><div class="locked-hint">${p.finish===game.players.length?'The Troika this round. Time for a comeback.':'All clear. Sit back and watch the rest of the table.'}</div>`;return;}
+    const source=p.phase==='out'?'hand':p.phase,turn=myTurn(),jump=!turn&&hasJump();
+    $('#hand-panel').classList.toggle('jump-ready',jump);
+    const cards=source==='down'?p.downSlots.map(id=>backHTML(id,turn,selected.includes(id))).join(''):(p[source]||[]).map(c=>cardHTML(c,{button:true,disabled:!turn&&!canJump(c.id,source),source,selectedCard:selected.includes(c.id),canPlay:turn?legal(c):jump?canJump(c.id,source):null})).join('');
     const chosen=source==='down'?null:(p[source]||[]).find(c=>selected.includes(c.id));
-    const fails=chosen&&!legal(chosen), label=source==='down'?'Try blind card':source==='up'&&fails?'Attempt & pick up':'Play '+(selected.length>1?selected.length+' cards':'card');
-    let hint=!turn?'Waiting for your turn':source==='down'?'Choose one. Trust your luck.':source==='up'?'Play from the table. Too low? Take only the attempted card + pile.':game.openingRank!==null?'You must open with '+rankName(game.openingRank):'Click to select matching cards · Double-click to play a card';
-    $('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${source==='hand'?'YOUR HAND':source==='up'?'YOUR FACE-UP CARDS':'YOUR BLIND CARDS'} <span style="color:var(--muted)">· ${source==='hand'?p.handCount:source==='up'?p.up.length:p.downCount}</span></strong><span>${turn?'YOUR TURN':'HOLD TIGHT'}</span></div><div class="hand-area"><div class="hand-cards">${cards}</div><div class="hand-actions"><button class="primary" id="play-button" ${!turn||!selected.length?'disabled':''}>${label} ${arrow}</button>${source==='hand'?`<button class="secondary" id="pickup-button" ${!turn||!game.pile.length||game.openingRank!==null?'disabled':''}>Pick up pile (${game.pile.length})</button>`:''}</div></div><div class="small-note muted" id="hand-hint" aria-live="polite">${hint}</div>`;
+    const fails=chosen&&!legal(chosen),label=jump?'Jump in & burn':source==='down'?'Try blind card':source==='up'&&fails?'Attempt & pick up':'Play '+(selected.length>1?selected.length+' cards':'card');
+    const canSubmit=turn?selected.length>0:selected.length===1&&canJump(selected[0],source);
+    const hint=game.paused?'The host has paused the table.':jump?'Jump-in available: play one highlighted card to complete the burn and steal the turn.':!turn?'Waiting for your turn':source==='down'?'Choose one. Trust your luck.':source==='up'?'Play from the table. Too low? Take only the attempted card + pile.':game.openingRank!==null?'You must open with '+rankName(game.openingRank):'Click to select matching cards · Double-click to play a card';
+    $('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${source==='hand'?'YOUR HAND':source==='up'?'YOUR FACE-UP CARDS':'YOUR BLIND CARDS'} <span style="color:var(--muted)">· ${source==='hand'?p.handCount:source==='up'?p.up.length:p.downCount}</span></strong><span>${game.paused?'PAUSED':turn?'YOUR TURN':jump?'JUMP IN':'HOLD TIGHT'}</span></div><div class="hand-area"><div class="hand-cards">${cards}</div><div class="hand-actions"><button class="primary" id="play-button" ${canSubmit?'':'disabled'}>${label} ${arrow}</button>${source==='hand'?`<button class="secondary" id="pickup-button" ${!turn||!game.pile.length||game.openingRank!==null?'disabled':''}>Pick up pile (${game.pile.length})</button>`:''}</div></div><div class="small-note muted" id="hand-hint" aria-live="polite">${hint}</div>`;
+  }
+  function renderSessionTools() {
+    const el=$('#session-tools');el.hidden=false;
+    el.innerHTML=`<button class="secondary" id="scoreboard-button">Scoreboard</button><button class="secondary" id="replay-button" ${game.lastMove?'':'disabled'}>↻ Replay</button>${host()&&game.status==='playing'?`<button class="secondary" id="pause-button" aria-pressed="${Boolean(game.paused)}">${game.paused?'▶ Resume':'Ⅱ Pause'}</button>`:''}`;
+  }
+  function publicFaces(cards) {
+    return (Array.isArray(cards)?cards:[]).filter(c=>c&&Number.isInteger(c.rank)&&c.rank>=2&&c.rank<=14&&Object.hasOwn(suits,c.suit));
+  }
+  function historyHTML() {
+    const cards=publicFaces(game.recentCards).slice(-10);
+    return `<div id="pile-history" class="pile-history" role="region" aria-label="Last 10 played cards"><div class="pile-history-header"><strong>Last ${cards.length} played cards</strong><button class="history-close" type="button" id="close-pile-history" aria-label="Close card history">×</button></div>${cards.length?`<div class="history-cards" role="list">${cards.map(c=>`<span class="history-card event-card ${['H','D'].includes(c.suit)?'red':''}" role="listitem" aria-label="${rankName(c.rank)} of ${{S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[c.suit]}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')}</div><small class="history-note">Oldest → newest · includes burns and reveals</small>`:'<p class="history-empty">No cards have been played this round yet.</p>'}</div>`;
+  }
+  function renderScoreboard() {
+    const rows=[...(game?.scoreboard||[])].sort((a,b)=>b.wins-a.wins||b.rounds-a.rounds||a.name.localeCompare(b.name));
+    $('#scoreboard-content').innerHTML=`<p class="muted">This table’s completed rounds. Scores carry across rematches.</p>${rows.length?`<div class="scoreboard-scroll"><table class="scoreboard-table"><thead><tr><th scope="col">Player</th><th scope="col">Rounds</th><th scope="col">Wins</th><th scope="col">Last</th><th scope="col">Burns</th><th scope="col">Pickups</th></tr></thead><tbody>${rows.map(r=>`<tr><th scope="row">${esc(r.name)}${r.id===game.youId?' · You':''}${game.players.some(p=>p.id===r.id)?'':' · left'}</th><td>${r.rounds}</td><td>${r.wins}</td><td>${r.lastPlaces}</td><td>${r.burns}</td><td>${r.pickups}</td></tr>`).join('')}</tbody></table></div>`:'<p class="empty-feed">Finish a round to start the session scoreboard.</p>'}`;
+  }
+  function renderReplay() {
+    const m=replaySnapshot;if(!m)return;
+    const cards=publicFaces(m.cards),before=publicFaces(m.beforePile),after=publicFaces(m.afterPile);
+    const reason=m.burnReason==='ten'?'10 burns on anything.':m.burnReason==='all_suits'?'The same-rank run completed all four suits.':m.burnReason==='four'?'Four consecutive matching ranks burned the pile.':m.type==='pickup'?'The pile was picked up.':cards.at(-1)?.rank===6?'6 reset the pile: any rank can follow.':'The card matched or beat the pile.';
+    $('#replay-content').innerHTML=`<p class="replay-summary">${esc(m.text)}</p><div class="replay-steps"><section><h3>Before · ${m.pileBeforeCount} in pile</h3><div class="event-cards">${before.map(c=>`<span class="event-card ${['H','D'].includes(c.suit)?'red':''}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')||'<span class="muted">Empty pile</span>'}</div></section><section class="replay-action"><h3>${esc(m.playerName)} ${m.type==='pickup'?'revealed / picked up':'played'}</h3><div class="replay-cards replay-enter ${m.holeAdded?'replay-burn':''}">${cards.map(c=>cardHTML(c)).join('')||'<span class="muted">Picked up the playing pile</span>'}</div><p>${reason} ${m.extraTurn?'Extra turn earned.':''}</p></section><section><h3>After · ${m.pileAfterCount} in pile${m.holeAdded?' · '+m.holeAdded+' sent to the hole':''}</h3><div class="event-cards">${after.map(c=>`<span class="event-card ${['H','D'].includes(c.suit)?'red':''}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')||'<span class="muted">Empty pile</span>'}</div></section></div>`;
   }
   function renderControls() {
     const p=me();if(!p)return;
@@ -226,7 +258,8 @@
     $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${p.finish?'NICE WORK':myTurn()?'THE TABLE IS YOURS':'KEEP YOUR CARDS CLOSE'}</div><h2>${p.finish?'You’re all clear.':myTurn()?'Make your move.':esc(turnPlayer?.name)+'’s turn.'}</h2><p>${p.finish?'Enjoy the show. You’ve played your last card.':myTurn()?phase==='down'?'One blind card at a time. Fortune favours the brave.':phase==='up'?'Your hand is empty. Time to play the face-up cards.':'Match the pile or go higher. A 6 resets. A 10 burns.':'Watch the pile. Plan your next play.'}</p><div class="stage-list">${phases.map(([id,label,count],i)=>`<div class="stage-item ${id===phase?'current':i<current||p.finish?'done':''}"><span class="stage-number">${i<current||p.finish?'✓':i+1}</span><span>${label}</span><strong style="margin-left:auto;font-size:10px;font-weight:normal">${count}</strong></div>`).join('')}</div><div class="stat-row"><span>Your burns</span><strong>${p.stats.burns}</strong></div><div class="stat-row"><span>Your pickups</span><strong>${p.stats.pickups}</strong></div><p class="small-note">${game.deckCount?'Draw back to three after playing. '+game.deckCount+' cards left in the deck.':'The deck is empty. Every card counts now.'}</p><button class="text-button" data-leave>Leave · a bot takes your seat</button></div>`;
   }
   function selectCard(id,source) {
-    if(!myTurn()||busy||source!==currentSource())return;
+    if(busy||source!==currentSource()||(!myTurn()&&!canJump(id,source)))return;
+    if(!myTurn()){selected=selected.includes(id)?[]:[id];if(source==='hand')paintHandSelection();else renderHand();renderSeats();return;}
     if(source==='down'){selected=selected.includes(id)?[]:[id];}
     else {
       const cards=me()[source], card=cards.find(c=>c.id===id);if(!card)return;
@@ -247,20 +280,23 @@
       button.setAttribute('aria-pressed',String(isSelected));
     });
     const button=$('#play-button');
-    button.disabled=!myTurn()||!selected.length;
-    button.innerHTML='Play '+(selected.length>1?selected.length+' cards':'card')+' '+arrow;
+    button.disabled=myTurn()?!selected.length:!(selected.length===1&&canJump(selected[0],currentSource()));
+    button.innerHTML=(myTurn()?'Play '+(selected.length>1?selected.length+' cards':'card'):'Jump in & burn')+' '+arrow;
   }
   function dismissMatching() {
     pendingQuickPlay=null;
     if($('#matching-dialog').open)$('#matching-dialog').close();
   }
   async function playCards(source,ids) {
-    if(busy || !myTurn() || currentSource()!==source || !ids.length)return;
-    const result=await act('play',{source,cards:ids});
+    if(busy || currentSource()!==source || !ids.length)return;
+    const jump=!myTurn()&&ids.length===1&&canJump(ids[0],source);
+    if(!myTurn()&&!jump)return;
+    const result=jump?await act('jump',{source,card:ids[0],version:game.version}):await act('play',{source,cards:ids});
     if(result){selected=[];renderHand();renderSeats();}
   }
   async function quickPlayCard(id) {
-    if(busy || !myTurn() || currentSource()!=='hand' || $('#matching-dialog').open)return;
+    if(busy || (!myTurn()&&!canJump(id,'hand')) || currentSource()!=='hand' || $('#matching-dialog').open)return;
+    if(!myTurn()){await playCards('hand',[id]);return;}
     const card=me().hand.find(c=>c.id===id);
     if(!card)return;
     if(!legal(card)){selectCard(id,'hand');return;}
@@ -328,6 +364,7 @@
     if(e.target.id==='room-input'){draftRoom=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);e.target.value=draftRoom;lobbyPreview=null;if(draftRoom.length===5)previewLobby();}
   });
   document.addEventListener('change',e=>{
+    if(e.target.id==='jump-in'&&!game&&!joinMode){draftSettings.jumpIn=e.target.checked;expandedSetup.jumpIn=e.target.checked;return;}
     if(e.target.id==='burn-rule' && !game && !joinMode){draftSettings.burnRule=e.target.value;expandedSetup.burnRule=e.target.value;renderEntry();renderSeats();return;}
     if(e.target.id!=='seat-count' && e.target.id!=='deck-count')return;
     if(game || joinMode || draftSettings.mode!=='expanded')return;
@@ -340,6 +377,14 @@
   });
   document.addEventListener('click',async e=>{
     const target=e.target.closest('button');if(!target)return;
+    if(target.id==='scoreboard-button'){renderScoreboard();$('#scoreboard-dialog').showModal();return;}
+    if(target.id==='replay-button'){if(game?.lastMove){replaySnapshot=JSON.parse(JSON.stringify(game.lastMove));renderReplay();$('#replay-dialog').showModal();}return;}
+    if(target.id==='replay-again'){renderReplay();return;}
+    if(target.classList.contains('close-scoreboard-dialog')){$('#scoreboard-dialog').close();return;}
+    if(target.classList.contains('close-replay-dialog')){$('#replay-dialog').close();return;}
+    if(target.id==='pause-button'||target.hasAttribute('data-pause')){if(host())await act('pause',{paused:!game.paused});return;}
+    if(target.id==='pile-inspect'){pileHistoryOpen=!pileHistoryOpen;renderCenter();return;}
+    if(target.id==='close-pile-history'){pileHistoryOpen=false;renderCenter();return;}
     if(target.id==='quick-play-one'){await confirmQuickPlay(false);return;}
     if(target.id==='quick-play-group'){await confirmQuickPlay(true);return;}
     if(target.id==='quick-play-cancel'||target.classList.contains('close-matching-dialog')){dismissMatching();return;}
@@ -352,7 +397,7 @@
     if(target.id==='sound-toggle'){sound=!sound;target.setAttribute('aria-label',sound?'Mute sound':'Enable sound');target.title=sound?'Mute sound':'Enable sound';$('.sound-off').hidden=sound;if(sound)tone('turn');return;}
     if(target.hasAttribute('data-copy')){copyInvite();return;}
     if(target.dataset.modeChoice){
-      draftSettings=target.dataset.modeChoice==='expanded'?{...expandedSetup,burnRule:draftSettings.burnRule||'any'}:{...STANDARD_SETUP,burnRule:draftSettings.burnRule||'any'};
+      draftSettings=target.dataset.modeChoice==='expanded'?{...expandedSetup,burnRule:draftSettings.burnRule||'any',jumpIn:Boolean(draftSettings.jumpIn)}:{...STANDARD_SETUP,burnRule:draftSettings.burnRule||'any',jumpIn:Boolean(draftSettings.jumpIn)};
       if(chosenSeat>=capacity())chosenSeat=0;
       renderEntry();renderSeats();return;
     }
@@ -382,6 +427,14 @@
     e.preventDefault();
     quickPlayCard(card.dataset.card);
   });
+  function markHistoryExpanded(event,expanded) {
+    const wrap=event.target.closest?.('.pile-history-wrap');
+    if(wrap && (!(event.relatedTarget instanceof Node)||!wrap.contains(event.relatedTarget)))wrap.querySelector('#pile-inspect').setAttribute('aria-expanded',String(expanded||pileHistoryOpen));
+  }
+  document.addEventListener('mouseover',e=>markHistoryExpanded(e,true));
+  document.addEventListener('mouseout',e=>markHistoryExpanded(e,false));
+  document.addEventListener('focusin',e=>markHistoryExpanded(e,true));
+  document.addEventListener('focusout',e=>markHistoryExpanded(e,false));
   $('#matching-dialog').addEventListener('close',()=>{pendingQuickPlay=null;});
   document.addEventListener('click',e=>{if(!e.target.closest('.theme-wrap')){$('#theme-menu').hidden=true;$('#theme-toggle').setAttribute('aria-expanded','false');}});
   $('#rules-dialog').addEventListener('click',e=>{if(e.target===$('#rules-dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
