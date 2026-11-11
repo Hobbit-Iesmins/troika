@@ -3,6 +3,8 @@
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const store = {get(k){try{return localStorage.getItem('troika.'+k);}catch{return null;}},set(k,v){try{localStorage.setItem('troika.'+k,v);}catch{}},remove(k){try{localStorage.removeItem('troika.'+k);}catch{}}};
+  const API_URL = document.querySelector('meta[name="troika-api"]')?.content || 'api.php';
+  const CLOUD = API_URL.startsWith('/api/');
   const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1,burnRule:'any',jumpIn:false};
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
@@ -46,14 +48,14 @@
   async function request(action, data = {}, auth = true) {
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 12000);
     try {
-      const response = await fetch('api.php', {method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',signal:controller.signal,body:JSON.stringify({action,...(auth && credentials ? credentials : {}),...data})});
+      const response = await fetch(API_URL, {method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',signal:controller.signal,body:JSON.stringify({action,...(auth && credentials ? credentials : {}),...data})});
       let result;
-      try {result=await response.json();} catch {throw new Error('PHP is not responding. Open Troika through MAMP (not by double-clicking index.html).');}
+      try {result=await response.json();} catch {throw new Error(CLOUD?'The game server is not responding. Please refresh and try again.':'PHP is not responding. Open Troika through MAMP (not by double-clicking index.html).');}
       if (!response.ok || result.error) throw new Error(result.error || 'The table could not complete that action.');
       return result;
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('The host took too long to respond. Keep this page open to reconnect.');
-      if (e instanceof TypeError) throw new Error('Cannot reach the host. Check the local network and MAMP, then retry.');
+      if (e instanceof TypeError) throw new Error(CLOUD?'Cannot reach the game server. Check your internet connection, then retry.':'Cannot reach the host. Check the local network and MAMP, then retry.');
       throw e;
     } finally {clearTimeout(timeout);}
   }
@@ -103,7 +105,7 @@
       catch(e){setConnection(false);if(game)$('#turn-banner').textContent='Connection lost. Reconnecting to the host…';if(/seat key|Table not found/.test(e.message)){clearCredentials();renderHome();toast(e.message,true);}}
       finally{polling=false;}
     }
-    pollTimer=setTimeout(poll,1000);
+    pollTimer=setTimeout(poll,document.hidden?10000:1000);
   }
   function cardHTML(card,{button=false,small=false,disabled=false,source='',selectedCard=false,canPlay=null}={}) {
     const special=card.rank===6?'special-six':card.rank===10?'special-ten':'';
@@ -135,7 +137,7 @@
     $('#table-center').innerHTML=`<div class="welcome-cards">${cardHTML({id:'a',rank:14,suit:'S'})}${cardHTML({id:'b',rank:10,suit:'D'})}${cardHTML({id:'c',rank:6,suit:'C'})}</div><div class="center-word">There’s a seat for you.</div><div class="center-note">BRING YOUR FRIENDS. LEAVE YOUR CARDS.</div>`;
     $('#turn-banner').textContent='Pick your spot. Make yourself at home.';
     $('#hand-panel').innerHTML='<div class="hand-heading"><strong>THE DEAL</strong><span>3 + 3 + 3</span></div><div class="welcome-hand"><div class="outline-cards"><span></span><span></span><span></span></div><p><strong>Three in your hand. Six on the table.</strong><br>Get rid of every card. Stay out of last place.</p></div>';
-    renderEntry();renderSeats();setConnection(true,'LOCAL PLAY');
+    renderEntry();renderSeats();setConnection(true,CLOUD?'ONLINE PLAY':'LOCAL PLAY');
   }
   function seatButtons() {
     return seats().map(i=>`<button type="button" data-choose-seat="${i}" class="${chosenSeat===i?'chosen':''}" aria-label="Seat ${i+1}" aria-pressed="${chosenSeat===i}" ${lobbyPreview?.players.some(p=>p.seat===i)?'disabled':''}>${i+1}</button>`).join('');
@@ -248,7 +250,7 @@
     const p=me();if(!p)return;
     if(game.status==='lobby') {
       const allReady=game.players.every(p=>p.ready),count=game.players.length;
-      $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">TABLE ${esc(game.room)}</div><h2>${host()?'You’re the host.':'Make yourself at home.'}</h2><p>${host()?'Invite your lab mates, or fill the empty seats with bots.':'Take your seat and get ready. The host will deal when everyone is set.'}</p><div class="status-line"><span>Seats taken</span><strong>${count} / ${capacity()}</strong></div><div class="status-line"><span>Players ready</span><strong>${game.players.filter(p=>p.ready).length} / ${count}</strong></div><div class="settings-summary">${esc(setupLabel())}</div><label class="field-label">YOUR SEAT</label><div class="seat-picker" role="group" aria-label="Change your seat">${seats().map(i=>`<button type="button" data-move-seat="${i}" class="${p.seat===i?'chosen':''}" aria-label="Move to seat ${i+1}" aria-pressed="${p.seat===i}" ${game.players.some(x=>x.seat===i&&x.id!==p.id)?'disabled':''}>${i+1}</button>`).join('')}</div><div class="lobby-actions"><button class="${p.ready?'secondary':'primary'}" id="ready-button">${p.ready?'✓ You’re ready · undo':'I’m ready'} </button>${host()?`<button class="primary" id="start-button" ${count<2||!allReady?'disabled':''}>Deal the cards ${arrow}</button><button class="secondary" id="add-bot-button" ${count>=capacity()?'disabled':''}>+ Add a practice bot</button>`:''}</div><div class="share-box"><button data-copy>Copy invite link ↗</button><span>${localhost()?'Share your private IP instead of localhost.':'Friends join on your local network.'}</span></div><p class="small-note">${count<2?'At least two players needed. Bots count.':!allReady?'Waiting for everyone to be ready.':'Everyone’s ready. Let’s play.'}</p><button class="text-button" data-leave>Leave this table</button></div>`;return;
+      $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">TABLE ${esc(game.room)}</div><h2>${host()?'You’re the host.':'Make yourself at home.'}</h2><p>${host()?'Invite your lab mates, or fill the empty seats with bots.':'Take your seat and get ready. The host will deal when everyone is set.'}</p><div class="status-line"><span>Seats taken</span><strong>${count} / ${capacity()}</strong></div><div class="status-line"><span>Players ready</span><strong>${game.players.filter(p=>p.ready).length} / ${count}</strong></div><div class="settings-summary">${esc(setupLabel())}</div><label class="field-label">YOUR SEAT</label><div class="seat-picker" role="group" aria-label="Change your seat">${seats().map(i=>`<button type="button" data-move-seat="${i}" class="${p.seat===i?'chosen':''}" aria-label="Move to seat ${i+1}" aria-pressed="${p.seat===i}" ${game.players.some(x=>x.seat===i&&x.id!==p.id)?'disabled':''}>${i+1}</button>`).join('')}</div><div class="lobby-actions"><button class="${p.ready?'secondary':'primary'}" id="ready-button">${p.ready?'✓ You’re ready · undo':'I’m ready'} </button>${host()?`<button class="primary" id="start-button" ${count<2||!allReady?'disabled':''}>Deal the cards ${arrow}</button><button class="secondary" id="add-bot-button" ${count>=capacity()?'disabled':''}>+ Add a practice bot</button>`:''}</div><div class="share-box"><button data-copy>Copy invite link ↗</button><span>${localhost()?'Share your private IP instead of localhost.':(CLOUD?'Friends join using this HTTPS invite link.':'Friends join on your local network.')}</span></div><p class="small-note">${count<2?'At least two players needed. Bots count.':!allReady?'Waiting for everyone to be ready.':'Everyone’s ready. Let’s play.'}</p><button class="text-button" data-leave>Leave this table</button></div>`;return;
     }
     if(game.status==='finished') {
       $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">THE FINAL WORD</div><h2>The pecking order.</h2>${game.results.map((id,i)=>{const player=game.players.find(x=>x.id===id);return `<div class="result-row"><span class="result-rank">${i+1}</span><div><strong>${esc(player?.name)}${id===game.youId?' · You':''}</strong><small>${i===game.results.length-1?'THE TROIKA':i===0?'FIRST OUT · NICELY PLAYED':'OUT IN '+ordinal(i+1).toUpperCase()+' PLACE'} · ${player?.stats.burns||0} burns · ${player?.stats.pickups||0} pickups</small></div></div>`;}).join('')}<div class="lobby-actions">${host()?'<button class="primary" id="rematch-button">Same seats. Fresh cards. ↻</button>':'<p>Waiting for the host to start a rematch.</p>'}<button class="secondary" data-leave>Leave table</button></div></div>`;return;
@@ -355,7 +357,7 @@
   }
   async function copyInvite() {
     if(!game)return; const url=new URL(location.href);url.search='';url.searchParams.set('room',game.room);
-    try {if(!navigator.clipboard)throw new Error();await navigator.clipboard.writeText(url.href);toast(localhost()?'Link copied. Replace localhost with your computer’s private IP before sharing.':'Invite link copied. Friends need the same local network.');}
+    try {if(!navigator.clipboard)throw new Error();await navigator.clipboard.writeText(url.href);toast(localhost()?'Link copied. Replace localhost with your computer’s private IP before sharing.':(CLOUD?'Invite link copied. Friends can join from their own devices.':'Invite link copied. Friends need the same local network.'));}
     catch {const dialog=document.createElement('dialog');dialog.className='invite-dialog';dialog.innerHTML=`<div class="dialog-heading"><h2>Your table invite</h2><button class="icon-button" data-close-invite aria-label="Close invite">×</button></div><p class="muted">Copy this link. Replace localhost with your host computer’s private IP when sharing.</p><input readonly aria-label="Invitation link" value="${esc(url.href)}"><p class="muted">Table code: ${esc(game.room)}</p>`;document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.querySelector('[data-close-invite]').onclick=()=>dialog.close();dialog.showModal();dialog.querySelector('input').select();}
   }
   document.addEventListener('submit',e=>{if(e.target.id==='entry-form'){e.preventDefault();enter();}});

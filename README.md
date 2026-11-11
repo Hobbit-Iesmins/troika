@@ -1,6 +1,15 @@
 # Troika
 
-A local-network card game for 2–5 players in Standard mode, or up to 12 players in Expanded mode, with practice bots, private hands, selectable seats, and switchable table themes. No accounts, internet service, Composer, or Node.js are needed to run it.
+A card game for 2–5 players in Standard mode, or up to 12 players in Expanded mode, with practice bots, private hands, selectable seats, and switchable table themes. Run it on your local network with MAMP, or host it online with Vercel and PostgreSQL. Players do not need accounts.
+
+## Choose how to host
+
+| Host | Runtime and storage | Players join with |
+| --- | --- | --- |
+| Local MAMP | PHP 8 + PDO SQLite; no Node.js, Composer, MySQL, or internet service needed | Your private IP and Apache port on the same local network |
+| Vercel | Node.js 22 + a separate PostgreSQL database, such as Neon | Your deployed HTTPS invite link from any network |
+
+**For Vercel, follow [the deployment guide](docs/VERCEL.md).** Import this repository at its root, connect PostgreSQL, and set the server-side database environment variable before playing. The cloud build publishes the interface and a Node API; the PHP version remains available for local hosting.
 
 ## Run with MAMP
 
@@ -80,13 +89,23 @@ Your browser stores a private player token so refreshing or reopening the same p
 
 If someone disconnects, their seat and cards stay in the match so they can reconnect. After 30 seconds offline, the host can give their seat to a bot. That takeover ends the original player’s access to the seat. Leaving during a round also gives the seat to a bot so the game can continue.
 
-Shared matches are stored in SQLite outside the website folder, under PHP’s temporary directory in a folder named `troika-<installation hash>`. Apache’s PHP process needs permission to create and write there. For a more permanent location, set the `TROIKA_DATA_DIR` environment variable to a writable folder outside the web document root. Old tables are cleaned up after seven days when a new table is created; clearing the temporary directory also removes saved matches.
+For the MAMP runtime, shared matches are stored in SQLite outside the website folder, under PHP’s temporary directory in a folder named `troika-<installation hash>`. Apache’s PHP process needs permission to create and write there. For a more permanent location, set the `TROIKA_DATA_DIR` environment variable to a writable folder outside the web document root. Old tables are cleaned up after seven days when a new table is created; clearing the temporary directory also removes saved matches.
 
-This game is intended for trusted players on a private local network. Keep the installation on the lab LAN. No external fonts, analytics, or hosted game services are required.
+For local play, keep the MAMP installation on the lab LAN. The Vercel runtime stores shared matches in PostgreSQL and uses the deployed HTTPS domain. No external fonts or analytics are required.
 
 ## Checks
 
-From the game folder, run:
+For the cloud runtime, use Node.js 22:
+
+```sh
+npm ci
+npm test
+npm run build
+```
+
+Set `TEST_DATABASE_URL` to a disposable PostgreSQL database to run the database and concurrency tests. GitHub Actions supplies a test database automatically. See [the Vercel guide](docs/VERCEL.md) for deployment verification.
+
+For the local PHP runtime, run these from the game folder:
 
 ```sh
 php tests/engine-test.php

@@ -1,0 +1,15 @@
+{
+  "name": "troika-card-club",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Troika multiplayer card game for Vercel and local MAMP hosting",
+  "type": "commonjs",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "test": "node --test tests/cloud/*.test.cjs",
+    "test:ui:php": "node tests/ui-test.cjs"
+  },
+  "dependencies": { "pg": "^8.16.3" },
+  "devDependencies": { "jsdom": "^26.1.0" }
+}

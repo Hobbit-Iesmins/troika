@@ -1,4 +1,7 @@
-TROIKA — LOCAL CARD CLUB
+TROIKA — LOCAL OR ONLINE CARD CLUB
+
+VERCEL HOSTING: Follow docs/VERCEL.md. The cloud version uses Node.js
+and a connected PostgreSQL database. The instructions below are for MAMP.
 
 1. Put this troika folder in MAMP's htdocs folder.
 2. Start Apache in MAMP with PHP 8 or newer (PDO SQLite enabled).

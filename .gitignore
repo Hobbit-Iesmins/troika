@@ -1,0 +1,10 @@
+node_modules/
+public/
+.vercel/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.log
+coverage/

@@ -1,0 +1,9 @@
+.git
+.github
+tests
+server
+api.php
+node_modules
+public
+.env
+.env.*
