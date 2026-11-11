@@ -74,3 +74,7 @@ The original PHP checks remain available for MAMP and are listed in the main REA
 For a failed request, inspect the project's function logs in Vercel. Use the error category and timestamp to diagnose it; do not paste database URLs, passwords, or player tokens into logs or issue comments.
 
 Troika uses short HTTP polling to synchronize the table. Function and database usage depend on the number of active players and the length of your sessions, so review the limits of the Vercel and database plans you choose.
+
+## Supabase certificate verification
+
+If the game reports `DB_TLS_CERTIFICATE`, download the public server/root CA certificate from the Supabase project's database SSL settings. Set `DATABASE_CA_CERT` in Vercel to the full PEM text, including BEGIN/END CERTIFICATE, then redeploy. Multiline PEM or literal `\n` line breaks are accepted. Alternatively, the same public certificate may be committed as `cloud/certs/supabase.crt`; never use a private key for this file. Hostname and certificate verification remain enabled.

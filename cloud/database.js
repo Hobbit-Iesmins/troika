@@ -45,7 +45,22 @@ function poolConfig(env = process.env) {
   // Preserve provider CA/client-certificate parameters rather than silently discarding them.
   if (!loopback || (sslmode && sslmode !== 'disable') || ['1', 'true'].includes(ssl)) url.searchParams.set('sslmode', 'verify-full');
   url.searchParams.delete('uselibpqcompat');
+  let tls;
+  const fs=require('node:fs'), path=require('node:path');
+  const certificateFile=path.join(__dirname,'certs','supabase.crt');
+  const ca=env.DATABASE_CA_CERT || (fs.existsSync(certificateFile)?fs.readFileSync(certificateFile,'utf8'):null);
+  if(ca){
+    const certificate=ca.replace(/\\n/g,'\n');
+    if(!certificate.includes('-----BEGIN CERTIFICATE-----')||!certificate.includes('-----END CERTIFICATE-----'))throw new StorageError('DATABASE_CA_CERT must contain the public PEM CA certificate.','DB_CA_FORMAT');
+    tls={ca:certificate,rejectUnauthorized:true};
+    // pg URL SSL fields override the ssl object, so move certificate options out of the URL.
+    for(const [param,key] of [['sslcert','cert'],['sslkey','key']])if(url.searchParams.has(param)){
+      try{tls[key]=fs.readFileSync(url.searchParams.get(param),'utf8');}catch{throw new StorageError('Database client certificate configuration could not be loaded.','DB_CA_FORMAT');}
+    }
+    for(const key of ['sslmode','ssl','sslrootcert','sslcert','sslkey','sslnegotiation'])url.searchParams.delete(key);
+  }
   return {
+    ...(tls?{ssl:tls}:{}),
     connectionString: url.toString(),
     max: 3,
     idleTimeoutMillis: 10000,

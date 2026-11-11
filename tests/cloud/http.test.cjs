@@ -47,3 +47,11 @@ test('database diagnostics classify causes without exposing credentials or raw m
  }
  assert.equal(storageError({message:'Tenant or user not found'}).code,'DB_POOLER_USER');assert.equal(storageError(new Error('password=secret unknown failure')).code,'DB_UNAVAILABLE');
 });
+
+test('Supabase public CA is used without URL overriding verification',()=>{
+ const {poolConfig}=require('../../cloud/database.js');
+ const pem='-----BEGIN CERTIFICATE-----\npublic-example\n-----END CERTIFICATE-----';
+ const config=poolConfig({DATABASE_URL:'postgresql://user:example@db.example.test/postgres?sslmode=require',DATABASE_CA_CERT:pem.replaceAll('\n','\\n')});
+ assert.equal(config.ssl.ca,pem);assert.equal(config.ssl.rejectUnauthorized,true);assert.equal(new URL(config.connectionString).searchParams.has('sslmode'),false);
+ assert.throws(()=>poolConfig({DATABASE_URL:'postgresql://db.example.test/postgres',DATABASE_CA_CERT:'not a PEM certificate'}),StorageError);
+});
