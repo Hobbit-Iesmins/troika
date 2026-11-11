@@ -66,12 +66,23 @@ test('face-up failure takes only attempted cards plus pile; hand must clear befo
   assert.deepEqual(g.lastMove.cards,[{rank:2,suit:'H'}]);g.turnId=g.players[0].id;assert.throws(()=>play(g,0,'up'));
 });
 
-test('blind attempts are one at a time and failed reveal never exposes remaining cards',()=>{
+test('failed blind attempts stay private in events, replay and played-card history',()=>{
   const g=fixture();g.players[0].hand=[];g.players[0].up=[];g.players[0].down=[card(2,'D'),card(14,'H')];g.pile=[card(13)];
   assert.throws(()=>e.tk_play(g,g.players[0].id,'down',g.players[0].down.map(c=>c.id)));
   play(g,0,'down');assert.equal(g.players[0].down.length,1);assert.equal(g.players[0].hand.length,2);
-  assert.deepEqual(g.lastMove.cards,[{rank:2,suit:'D'}]);assert.deepEqual(faces(g.recentCards),[{rank:2,suit:'D'}]);
-  assert.ok([...g.lastMove.cards,...g.lastMove.beforePile,...g.lastMove.afterPile,...g.recentCards].every(c=>c.rank!==14));
+  const view=e.tk_view(g,g.players[1].id),event=view.events.at(-1);
+  assert.equal(event.text,`${g.players[0].name} picks up the pile (2 cards).`);
+  assert.deepEqual(event.cards,[]);assert.deepEqual(view.lastMove.cards,[]);assert.deepEqual(view.recentCards,[]);
+  assert.deepEqual(view.lastMove.beforePile,[{rank:13,suit:'S'}]);assert.deepEqual(view.lastMove.afterPile,[]);
+  assert.equal(view.players[0].hand,null);assert.equal(g.players[0].hand.some(c=>c.rank===2&&c.suit==='D'),true);
+});
+
+test('successful blind plays publish the card now on the pile',()=>{
+  const g=fixture();g.players[0].hand=[];g.players[0].up=[];g.players[0].down=[card(14,'D'),card(2,'H')];g.pile=[card(13)];
+  play(g,0,'down');const view=e.tk_view(g,g.players[1].id);
+  assert.deepEqual(view.events.at(-1).cards,[{rank:14,suit:'D'}]);
+  assert.deepEqual(view.lastMove.cards,[{rank:14,suit:'D'}]);assert.deepEqual(faces(view.recentCards),[{rank:14,suit:'D'}]);
+  assert.equal(view.pile.at(-1).rank,14);assert.equal(view.players[0].downCount,1);
 });
 
 test('illegal moves and duplicate/unowned IDs are rejected before consuming cards',()=>{

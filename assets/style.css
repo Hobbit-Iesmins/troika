@@ -282,8 +282,8 @@ body[data-paused="true"] .turn-banner{border:1px solid var(--gold);border-radius
 #pile-inspect:focus-visible{outline:2px solid var(--gold);outline-offset:6px}
 .pile-history-wrap .pile-history{position:absolute;z-index:12;left:50%;bottom:calc(100% + 9px);transform:translateX(-50%);display:none;width:clamp(220px,40vw,320px);max-width:calc(100vw - 28px);height:auto;padding:12px;border:1px solid var(--gold);border-radius:7px;background:var(--panel);box-shadow:0 12px 35px #0008;color:var(--text);text-align:left;pointer-events:auto;cursor:default}
 .pile-history:after{content:'';position:absolute;left:0;right:0;top:100%;height:12px}
-.pile-history-wrap:hover .pile-history,.pile-history-wrap:focus-within .pile-history,.pile-history-wrap.history-open .pile-history,.history-open .pile-history{display:block}
-.table-center:has(.pile-history-wrap:hover),.table-center:has(.pile-history-wrap:focus-within),.table-center:has(.history-open),.table-center.history-open,.board-wrap.history-open .table-center{z-index:10}
+.pile-history-wrap.history-open .pile-history,.history-open .pile-history{display:block}
+.table-center.history-open,.board-wrap.history-open .table-center{z-index:10}
 .pile-history-header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;line-height:1.4;color:var(--text)}
 .pile-history-header small{display:block;margin-top:3px;font-size:9px;color:var(--muted)}
 .pile-history-header button,.pile-history .history-close{border:0;background:transparent;color:var(--muted);font-size:19px;line-height:1;padding:2px 5px;cursor:pointer}
@@ -326,3 +326,45 @@ body[data-paused="true"] .turn-banner{border:1px solid var(--gold);border-radius
 /* Keep the scoreboard's scrolling in one table container. */
 #scoreboard-content{max-height:none;overflow:visible}
 .scoreboard-scroll{max-height:55dvh}
+
+/* Empty space between seats must allow the pile beneath it to receive hover/taps. */
+#seats{pointer-events:none}
+#seats .seat{pointer-events:auto}
+.pile-history-wrap.history-visible .pile-history{display:block}
+.table-center.history-visible,.board-wrap.history-visible .table-center{z-index:10}
+
+/* Leave room for the exposed card backs instead of letting them cross the seat label. */
+.reserve-stack{padding-bottom:11px}
+.reserve-stack .card-back{top:11px}
+.expanded-table .seat .reserve-stack{padding-bottom:7px}
+.expanded-table .seat .reserve-stack .card-back{top:7px}
+
+/* The turn cue stays on the hand panel, including when table cards are being played. */
+body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .hand-panel{
+  border-color:#ed7773;
+  box-shadow:0 0 0 2px #d34e4a44,0 0 20px #d34e4a22;
+  animation:your-turn-pulse 2s ease-in-out infinite;
+}
+body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .hand-heading>span{
+  color:#fff0ee;background:#8b3437;border:1px solid #ed7773;border-radius:4px;
+  padding:3px 7px;font-weight:bold;white-space:nowrap;
+}
+body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .turn-banner{
+  color:#ffe4e0;background:#6a292b;border:1px solid #d96662;border-radius:5px;font-weight:bold;
+}
+body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .seat.active.is-self .seat-avatar{
+  border-color:#f58b82;box-shadow:0 0 0 4px #d34e4a33,0 0 18px #d34e4a55;
+}
+body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .seat.active.is-self:after{
+  color:#ffb3aa;font-weight:bold;
+}
+body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .expanded-table .seat.active.is-self .seat-name{
+  color:#ffe4e0;background:#6a292b;box-shadow:0 0 0 1px #ed7773;
+}
+@keyframes your-turn-pulse{
+  0%,100%{box-shadow:0 0 0 2px #d34e4a44,0 0 14px #d34e4a22}
+  50%{box-shadow:0 0 0 3px #ed777388,0 0 24px #d34e4a55}
+}
+@media(prefers-reduced-motion:reduce){
+  body[data-your-turn="true"] .hand-panel{animation:none}
+}

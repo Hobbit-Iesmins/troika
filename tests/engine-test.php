@@ -148,7 +148,8 @@ try {
     $g['pile'] = [card(13)];
     playFirst($g, 'down');
     check(count($g['players'][0]['down']) === 2 && count($g['players'][0]['hand']) === 2, 'failed blind card takes itself and pile');
-    check(end($g['events'])['cards'] === [['rank'=>2,'suit'=>'S']], 'failed blind attempt reveals only its attempted face, excluding two remaining blind cards');
+    check(end($g['events'])['cards'] === [], 'failed blind attempt does not publish its private card');
+    check(end($g['events'])['text'] === 'Ada picks up the pile (2 cards).', 'failed blind attempt announces only the pickup');
     $g = fixture();
     $g['players'][0]['hand'] = [];
     $g['players'][0]['down'] = [card(14), card(14), card(6)];

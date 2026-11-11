@@ -233,8 +233,11 @@ function tk_play(array &$g, string $id, string $source, array $ids,bool $jump=fa
         $taken=count($g['pile'])+count($selected);
         $p['hand']=array_merge($p['hand'],$g['pile'],$selected); $g['pile']=[]; $p['stats']['pickups']++;
         tk_sort_hand($p); unset($p);
-        tk_touch($g,$name.' reveals '.tk_rank_name($rank).' and picks up '.$taken.' cards.','pickup',$id,$selected);
-        tk_record_move($g,$id,$before,$selected,'pickup',null,false,$holeBefore);
+        // A failed blind card goes into a private hand, so never publish its face.
+        $publicCards=$source==='down'?[]:$selected;
+        $text=$source==='down'?$name.' picks up the pile ('.$taken.' cards).':$name.' reveals '.tk_rank_name($rank).' and picks up '.$taken.' cards.';
+        tk_touch($g,$text,'pickup',$id,$publicCards);
+        tk_record_move($g,$id,$before,$publicCards,'pickup',null,false,$holeBefore);
         tk_finish_and_advance($g,$id); return;
     }
     $g['pile']=array_merge($g['pile'],$selected);

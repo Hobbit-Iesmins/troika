@@ -9,7 +9,7 @@
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
-  let pendingQuickPlay = null, pileHistoryOpen = false, replaySnapshot = null;
+  let pendingQuickPlay = null, pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
   let draftName = store.get('nickname') || '', draftRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
@@ -66,7 +66,7 @@
   }
   function clearCredentials() {
     dismissMatching();
-    pileHistoryOpen=false;replaySnapshot=null;
+    pileHistoryOpen=false;pileHistoryHovered=false;replaySnapshot=null;
     ['scoreboard-dialog','replay-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
     if(credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
@@ -75,7 +75,7 @@
   function applyState(state) {
     if(!state || (game && game.room===state.room && state.version<game.version)) return;
     const wasTurn=myTurn(), oldStatus=game?.status, oldPhase=currentSource(), wasOffline=$('#connection').classList.contains('offline');
-    if(game && (game.room!==state.room || game.round!==state.round))pileHistoryOpen=false;
+    if(game && (game.room!==state.room || game.round!==state.round || state.status!=='playing')){pileHistoryOpen=false;pileHistoryHovered=false;}
     game=state; setConnection(true);
     if(pendingQuickPlay && (game.room!==pendingQuickPlay.room || game.version!==pendingQuickPlay.version || !myTurn() || currentSource()!=='hand'))dismissMatching();
     if ((!myTurn() && !hasJump()) || oldPhase !== currentSource()) selected=[];
@@ -125,7 +125,8 @@
     return !top || [6,10].includes(card.rank) || top.rank===6 || card.rank>=top.rank;
   }
   function renderHome() {
-    document.body.dataset.gameStatus='home';document.body.dataset.paused='false';
+    document.body.dataset.gameStatus='home';document.body.dataset.paused='false';document.body.dataset.yourTurn='false';
+    $('#table-center').classList.remove('history-visible');
     $('#session-tools').hidden=true;
     $('#page-label').textContent='The card room';$('#headline').textContent='Your table. Your rules.';
     $('#subtitle').textContent='A little strategy. A little luck. Just don’t be the last one holding cards.';
@@ -175,7 +176,7 @@
     $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/${capacity()}</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
   }
   function renderGame() {
-    document.body.dataset.gameStatus=game.status;document.body.dataset.paused=String(Boolean(game.paused));
+    document.body.dataset.gameStatus=game.status;document.body.dataset.paused=String(Boolean(game.paused));document.body.dataset.yourTurn=String(myTurn());
     $('#page-label').textContent='Table '+game.room;$('#headline').textContent=game.status==='lobby'?'Good company starts here.':game.status==='finished'?'That’s a wrap.':'A little luck. A little nerve.';
     $('#subtitle').textContent=game.status==='lobby'?'Choose your seats. Invite your friends. Let the cards do the rest.':game.status==='finished'?'The cards have spoken. There’s always another round.':'Play it smart. Burn the pile. Get out before everyone else.';
     $('#table-badge').innerHTML=`<span class="live-dot"></span> ${game.status==='lobby'?capacity()+' SEATS':'ROUND '+game.round} · ${tableSettings().decks} ${tableSettings().decks===1?'DECK':'DECKS'}`;
@@ -198,6 +199,8 @@
     return `<div class="event ${esc(event.type)}"><div class="event-text">${esc(event.text)}</div>${badges?`<div class="event-cards" role="list" aria-label="Cards played or revealed">${badges}</div>`:''}</div>`;
   }
   function renderCenter() {
+    const historyFocus=$('.pile-history-wrap')?.contains(document.activeElement)?document.activeElement.id:null;
+    $('#table-center').classList.remove('history-visible');
     if(game.status==='lobby') {
       $('#table-center').innerHTML=`<div class="welcome-cards">${backHTML()}${cardHTML({id:'x',rank:14,suit:'S'})}${cardHTML({id:'y',rank:10,suit:'D'})}</div><div class="center-word">The gang’s getting together.</div><div class="center-note">${game.players.length} OF ${capacity()} SEATS TAKEN · ${game.players.filter(p=>p.ready).length} READY</div>`;
       $('#turn-banner').textContent=host()?'Add a bot at any empty seat, or invite a friend.':'Click an empty seat to change your spot before the deal.';return;
@@ -209,7 +212,9 @@
     }
     const top=game.pile.at(-1), active=game.players.find(p=>p.id===game.turnId);
     $('#table-center').innerHTML=`<div class="table-status">${game.openingRank!==null?'LOWEST CARD OPENS · '+rankName(game.openingRank):!top?'OPEN TABLE · ANY RANK':top.rank===6?'RESET · ANY RANK':rankName(top.rank)+' OR HIGHER · 6 OR 10'}</div><div class="game-piles"><div class="pile-group"><div>${game.deckCount?`<div class="deck-stack">${backHTML()}</div>`:'<div class="pile-empty">∅</div>'}</div><span>DECK · ${game.deckCount}</span></div><div class="pile-group pile-history-wrap ${pileHistoryOpen?'history-open':''}"><div><button id="pile-inspect" type="button" aria-label="Inspect the last 10 played cards" aria-controls="pile-history" aria-expanded="${pileHistoryOpen}">${game.pile.length?game.pile.slice(-3).map(c=>`<span class="pile-card">${cardHTML(c)}</span>`).join(''):'<span class="pile-empty">♧</span>'}</button></div><span>PILE · ${game.pile.length}</span>${historyHTML()}</div><div class="pile-group hole-group"><div class="hole">✧</div><span>HOLE · ${game.holeCount}</span></div></div>`;
-    $('#turn-banner').innerHTML=game.openingRank!==null?`<span style="color:var(--gold)">${esc(active?.name)} opens with ${rankName(game.openingRank)}, the lowest hand card.</span>`:myTurn()?'<span style="color:var(--gold)">Your move. Make it a good one.</span>':`Waiting for ${esc(active?.name)}${active?.bot?' <span class="loading-dots">···</span>':''}`;
+    if(historyFocus)$('#'+historyFocus)?.focus({preventScroll:true});
+    updatePileHistory();
+    $('#turn-banner').innerHTML=myTurn()?`<strong>YOUR TURN</strong> · ${game.openingRank!==null?'Open with '+rankName(game.openingRank)+', the lowest hand card.':'Your move. Make it a good one.'}`:game.openingRank!==null?`<span style="color:var(--gold)">${esc(active?.name)} opens with ${rankName(game.openingRank)}, the lowest hand card.</span>`:`Waiting for ${esc(active?.name)}${active?.bot?' <span class="loading-dots">···</span>':''}`;
     if(game.paused)$('#turn-banner').textContent='Table paused by the host. Cards and turns are frozen.';
   }
   function renderHand() {
@@ -234,7 +239,21 @@
   }
   function historyHTML() {
     const cards=publicFaces(game.recentCards).slice(-10);
-    return `<div id="pile-history" class="pile-history" role="region" aria-label="Last 10 played cards"><div class="pile-history-header"><strong>Last ${cards.length} played cards</strong><button class="history-close" type="button" id="close-pile-history" aria-label="Close card history">×</button></div>${cards.length?`<div class="history-cards" role="list">${cards.map(c=>`<span class="history-card event-card ${['H','D'].includes(c.suit)?'red':''}" role="listitem" aria-label="${rankName(c.rank)} of ${{S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[c.suit]}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')}</div><small class="history-note">Oldest → newest · includes burns and reveals</small>`:'<p class="history-empty">No cards have been played this round yet.</p>'}</div>`;
+    return `<div id="pile-history" class="pile-history" role="region" aria-label="Last 10 played cards"><div class="pile-history-header"><strong>Last ${cards.length} played cards</strong><button class="history-close" type="button" id="close-pile-history" aria-label="Close card history">×</button></div>${cards.length?`<div class="history-cards" role="list">${cards.map(c=>`<span class="history-card event-card ${['H','D'].includes(c.suit)?'red':''}" role="listitem" aria-label="${rankName(c.rank)} of ${{S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[c.suit]}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')}</div><small class="history-note">Oldest → newest · includes burned cards</small>`:'<p class="history-empty">No cards have been played this round yet.</p>'}</div>`;
+  }
+  function updatePileHistory() {
+    const wrap=$('.pile-history-wrap');if(!wrap)return;
+    const expanded=pileHistoryOpen||pileHistoryHovered||wrap.contains(document.activeElement);
+    wrap.classList.toggle('history-open',pileHistoryOpen);
+    wrap.classList.toggle('history-visible',expanded);
+    $('#table-center').classList.toggle('history-visible',expanded);
+    $('#pile-inspect').setAttribute('aria-expanded',String(expanded));
+  }
+  function closePileHistory() {
+    pileHistoryOpen=false;pileHistoryHovered=false;
+    const wrap=$('.pile-history-wrap');
+    if(wrap?.contains(document.activeElement))document.activeElement.blur();
+    updatePileHistory();
   }
   function renderScoreboard() {
     const rows=[...(game?.scoreboard||[])].sort((a,b)=>b.wins-a.wins||b.rounds-a.rounds||a.name.localeCompare(b.name));
@@ -385,8 +404,8 @@
     if(target.classList.contains('close-scoreboard-dialog')){$('#scoreboard-dialog').close();return;}
     if(target.classList.contains('close-replay-dialog')){$('#replay-dialog').close();return;}
     if(target.id==='pause-button'||target.hasAttribute('data-pause')){if(host())await act('pause',{paused:!game.paused});return;}
-    if(target.id==='pile-inspect'){pileHistoryOpen=!pileHistoryOpen;renderCenter();return;}
-    if(target.id==='close-pile-history'){pileHistoryOpen=false;renderCenter();return;}
+    if(target.id==='pile-inspect'){if(pileHistoryOpen)closePileHistory();else{pileHistoryOpen=true;updatePileHistory();}return;}
+    if(target.id==='close-pile-history'){closePileHistory();return;}
     if(target.id==='quick-play-one'){await confirmQuickPlay(false);return;}
     if(target.id==='quick-play-group'){await confirmQuickPlay(true);return;}
     if(target.id==='quick-play-cancel'||target.classList.contains('close-matching-dialog')){dismissMatching();return;}
@@ -429,14 +448,22 @@
     e.preventDefault();
     quickPlayCard(card.dataset.card);
   });
-  function markHistoryExpanded(event,expanded) {
+  function markHistoryExpanded(event,expanded,hover=false) {
     const wrap=event.target.closest?.('.pile-history-wrap');
-    if(wrap && (!(event.relatedTarget instanceof Node)||!wrap.contains(event.relatedTarget)))wrap.querySelector('#pile-inspect').setAttribute('aria-expanded',String(expanded||pileHistoryOpen));
+    if(!wrap || (event.relatedTarget instanceof Node && wrap.contains(event.relatedTarget)))return;
+    if(hover)pileHistoryHovered=expanded;
+    if(event.type==='focusout') {
+      // activeElement still points at the old control while focusout is dispatched.
+      const visible=pileHistoryOpen||pileHistoryHovered;
+      wrap.classList.toggle('history-visible',visible);$('#table-center').classList.toggle('history-visible',visible);
+      $('#pile-inspect').setAttribute('aria-expanded',String(visible));
+    } else updatePileHistory();
   }
-  document.addEventListener('mouseover',e=>markHistoryExpanded(e,true));
-  document.addEventListener('mouseout',e=>markHistoryExpanded(e,false));
+  document.addEventListener('mouseover',e=>markHistoryExpanded(e,true,true));
+  document.addEventListener('mouseout',e=>markHistoryExpanded(e,false,true));
   document.addEventListener('focusin',e=>markHistoryExpanded(e,true));
   document.addEventListener('focusout',e=>markHistoryExpanded(e,false));
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('.pile-history-wrap.history-visible'))closePileHistory();});
   $('#matching-dialog').addEventListener('close',()=>{pendingQuickPlay=null;});
   document.addEventListener('click',e=>{if(!e.target.closest('.theme-wrap')){$('#theme-menu').hidden=true;$('#theme-toggle').setAttribute('aria-expanded','false');}});
   $('#rules-dialog').addEventListener('click',e=>{if(e.target===$('#rules-dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});

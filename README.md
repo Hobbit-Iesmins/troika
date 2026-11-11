@@ -69,7 +69,7 @@ Use a card from your current phase: your hand, or a face-up table card once your
 
 **Scoreboard** tracks completed rounds at this table: rounds played, wins, last-place finishes, burns, and pile pickups. Totals stay across rematches, including rows for players who leave. Current-round card statistics remain separate until the round finishes. Existing saved games start collecting scores from completed rounds after the update; earlier scores are not invented.
 
-**Replay** shows the latest move's public cards, the pile before and after, and the reason for a burn or extra turn. It does not reveal another player's hand, the draw deck, or unattempted blind cards.
+**Replay** shows the latest move's public cards, the pile before and after, and the reason for a burn or extra turn. It does not reveal another player's hand, the draw deck, or blind cards taken into a hand after a failed attempt.
 
 The host can **Pause** an active round and **Resume** it. Pause freezes plays, pickups, jump-ins, and bot turns. Players can still reconnect, leave, read Table Talk, inspect the scoreboard, and review the last move while the table is paused.
 
@@ -77,9 +77,9 @@ The host can **Pause** an active round and **Resume** it. Pause freezes plays, p
 
 The table adapts to the available browser width and height, including when zooming to 130–150%. During a round, decorative content gives way to the table and hand controls. Large hands scroll within the hand area instead of pushing the play buttons down the page. On narrow screens, Table Talk is available from the speech-bubble button in the top bar.
 
-Table Talk shows each played or revealed card with its rank and suit, including grouped plays and cards that burn the pile. Hearts and diamonds use red symbols. Older saved events keep their original text without guessing a suit.
+Table Talk shows public plays with rank and suit, including grouped plays and cards that burn the pile. A failed blind attempt only reports the pickup, keeping that card private in Table Talk, replay, and pile history. Hearts and diamonds use red symbols. Older saved events keep their original text without guessing a suit.
 
-Hover over or focus the middle playing pile to inspect the last ten played or revealed cards; touch users can open the same history by tapping the pile. This history survives burns and pickups and clears for a new round. It contains only cards that have been made public.
+Hover over or focus the middle playing pile to inspect the last ten public cards; touch users can open the same history by tapping the pile. This history survives burns and pickups and clears for a new round. Failed blind attempts are excluded. Your turn has a red pulsing hand panel and an explicit turn banner; reduced-motion settings use a steady highlight.
 
 To update an existing MAMP installation, replace the game files in the same folder and refresh the browser. The versioned CSS and JavaScript links load the updated interface. Matches remain in the separate SQLite storage folder.
 

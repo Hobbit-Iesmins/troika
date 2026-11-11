@@ -27,6 +27,40 @@ function browser(handler,url='https://troika.example.test/'){
   async double(s){const card=w.document.querySelector(s);assert.ok(card,s);card.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));assert.equal(w.document.querySelector(s),card);card.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:2}));card.dispatchEvent(new w.MouseEvent('dblclick',{bubbles:true,detail:2}));await settle();},
   close(){w.close();},settle};
 }
+test('pile history is visible on hover, survives polling, and supports focus, touch and closing',async()=>{
+ const {fixture,card}=require('./fixtures.cjs');const g=fixture();g.recentCards=Array.from({length:12},(_,i)=>({rank:2+i,suit:['S','H','D','C'][i%4]}));g.pile=[card(13,'D')];
+ const id=g.players[0].id;
+ const handler=async(req,res)=>res.end(JSON.stringify({room:g.room,token:'test-seat-token',state:E.tk_view(g,id)}));
+ const page=browser(handler);
+ try{
+  const css=page.w.document.createElement('style');css.textContent=fs.readFileSync(path.join(root,'assets/style.css'),'utf8');page.w.document.head.append(css);
+  const style=s=>page.w.getComputedStyle(page.$(s));
+  page.input('#nickname','History tester');await page.submit();
+  assert.equal(style('#seats').pointerEvents,'none','seat positioning layer does not intercept pile hover');
+  assert.equal(style('#seats .seat').pointerEvents,'auto','actual seats stay interactive');
+  assert.equal(style('#pile-history').display,'none');
+  const enter=()=>page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseover',{bubbles:true,relatedTarget:null}));
+  const exit=()=>page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseout',{bubbles:true,relatedTarget:null}));
+  enter();assert.equal(style('#pile-history').display,'block');assert.equal(page.$('#pile-inspect').getAttribute('aria-expanded'),'true');assert.equal(style('#table-center').zIndex,'10');
+  assert.equal(page.$$('#pile-history .history-card').length,10);assert.equal(page.$('#pile-history .history-card').textContent.trim(),'4 ♦');
+  page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseout',{bubbles:true,relatedTarget:page.$('#pile-history')}));assert.equal(style('#pile-history').display,'block','moving into history keeps it open');
+  E.tk_touch(g,'Another player updates the table','test');await page.poll();assert.equal(style('#pile-history').display,'block','hover remains visible after live table rerenders');
+  exit();assert.equal(style('#pile-history').display,'none');
+  page.$('#pile-inspect').focus();assert.equal(style('#pile-history').display,'block');
+  E.tk_touch(g,'Keyboard history update','test');await page.poll();assert.equal(page.w.document.activeElement.id,'pile-inspect');assert.equal(style('#pile-history').display,'block','keyboard history stays focused across game updates');
+  page.$('#close-pile-history').focus();assert.equal(style('#pile-history').display,'block');
+  await page.click('#close-pile-history');assert.equal(style('#pile-history').display,'none','close works even while focus is inside history');
+  await page.click('#pile-inspect');exit();assert.equal(style('#pile-history').display,'block','click pins history for touch');
+  await page.click('#pile-inspect');assert.equal(style('#pile-history').display,'none','second tap closes pinned history');
+  enter();
+  page.w.document.dispatchEvent(new page.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(style('#pile-history').display,'none');
+  assert.equal(page.w.document.body.dataset.yourTurn,'true');assert.ok(page.$('#turn-banner').textContent.startsWith('YOUR TURN'));
+  assert.ok(style('#hand-panel').animation.includes('your-turn-pulse'));assert.equal(style('#hand-panel .hand-heading>span').backgroundColor,'rgb(139, 52, 55)');
+  g.paused=true;E.tk_touch(g,'Paused','pause');await page.poll();assert.equal(page.w.document.body.dataset.yourTurn,'false');assert.ok(!style('#hand-panel').animation.includes('your-turn-pulse'));
+  g.paused=false;g.turnId=g.players[1].id;E.tk_touch(g,'Next turn','test');await page.poll();assert.equal(page.w.document.body.dataset.yourTurn,'false');
+  assert.equal(page.errors.length,0);
+ }finally{page.close();}
+});
 test('cloud browser controls use the real Node handler and PostgreSQL for multiplayer, jumps, pause, replay and scores',{skip:!connectionString},async()=>{
  const schema='troika_ui_'+randomBytes(8).toString('hex'),admin=new Pool({connectionString,max:1});let pool,host,guest;
  try{
@@ -45,6 +79,12 @@ test('cloud browser controls use the real Node handler and PostgreSQL for multip
   const beforeReplay=host.calls.length;await host.click('#replay-button');assert.ok(host.$('#replay-dialog').open);assert.ok(host.$('#replay-content').textContent.includes('4 sent to the hole'));await host.click('#replay-again');assert.equal(host.calls.length,beforeReplay);await host.click('.close-replay-dialog');
   await host.click('#pause-button');assert.equal((await load()).paused,true);assert.ok(host.$$('#hand-panel [data-card]').every(el=>el.disabled));await guest.poll();assert.equal(guest.$('#pause-button'),null);assert.equal(guest.w.document.body.dataset.paused,'true');await guest.click('#scoreboard-button');assert.ok(guest.$('#scoreboard-dialog').open);await guest.click('.close-scoreboard-dialog');await host.click('#pause-button');assert.equal((await load()).paused,false);
   const ace=hp.hand[1].id;await host.double(`#hand-panel [data-card="${ace}"]`);assert.deepEqual(host.calls.filter(c=>c.action==='play').at(-1).cards,[ace]);
+  g=await load();g.deck=[];g.pile=[card(14,'C')];g.openingRank=null;g.turnId=hp.id;g.recentCards=[];const blindPlayer=g.players.find(p=>p.id===hp.id);blindPlayer.hand=[];blindPlayer.up=[];blindPlayer.down=[card(5,'D'),card(14,'S')];await save(g);await host.poll();
+  await host.click('#hand-panel [data-source="down"]');await host.click('#play-button');
+  for(const selector of ['#activity .event:first-child','#talk-feed .event:first-child']){assert.equal(host.$(selector+' .event-text').textContent,'Cloud Host picks up the pile (2 cards).');assert.equal(host.$(selector+' .event-card'),null);}
+  await guest.poll();assert.equal(guest.$('#activity .event:first-child .event-card'),null);assert.equal(guest.responses.at(-1).state.players.find(p=>p.id===hp.id).hand,null);
+  await guest.click('#replay-button');assert.equal(guest.$$('#replay-content .replay-cards .card').length,0);assert.ok(!guest.$('#replay-content').textContent.includes('5'));await guest.click('.close-replay-dialog');
+  assert.equal((await load()).recentCards.length,0,'failed blind attempt is not a public played card');
   g=await load();g.deck=[];g.pile=[];g.hole=[];g.openingRank=null;g.results=[];g.turnId=hp.id;for(const p of g.players){p.hand=[card(2,'S')];p.up=[];p.down=[];p.finish=null;}await save(g);await host.poll();await host.click('#hand-panel [data-card]');await host.click('#play-button');assert.equal((await load()).status,'finished');await host.click('#scoreboard-button');const row=host.$$('#scoreboard-content tbody tr').find(tr=>tr.textContent.includes('Cloud Host'));assert.equal(row.children[1].textContent,'1');assert.equal(row.children[2].textContent,'1');await host.click('.close-scoreboard-dialog');await host.click('#rematch-button');assert.equal((await load()).settings.maxPlayers,9);assert.equal(host.w.document.body.dataset.gameStatus,'lobby');assert.equal(host.errors.length,0);assert.equal(guest.errors.length,0);
  }finally{host?.close();guest?.close();if(pool)await pool.end();await admin.query('DROP SCHEMA IF EXISTS '+schema+' CASCADE');await admin.end();}
 });

@@ -202,8 +202,11 @@ function tk_play(g, id, source, ids, jump=false) {
   if(!legal) {
     const taken=g.pile.length+selected.length;
     p.hand=[...p.hand,...g.pile,...selected];g.pile=[];p.stats.pickups++;tk_sort_hand(p);
-    tk_touch(g,`${name} reveals ${tk_rank_name(rank)} and picks up ${taken} cards.`,'pickup',id,selected);
-    tk_record_move(g,id,before,selected,'pickup',null,false,holeBefore);tk_finish_and_advance(g,id);return;
+    // A failed blind card goes into a private hand, so never publish its face.
+    const publicCards=source==='down'?[]:selected;
+    const text=source==='down'?`${name} picks up the pile (${taken} cards).`:`${name} reveals ${tk_rank_name(rank)} and picks up ${taken} cards.`;
+    tk_touch(g,text,'pickup',id,publicCards);
+    tk_record_move(g,id,before,publicCards,'pickup',null,false,holeBefore);tk_finish_and_advance(g,id);return;
   }
   g.pile=[...g.pile,...selected];
   if(source==='hand')tk_refill(g,i);
