@@ -73,6 +73,8 @@ Use a card from your current phase: your hand, or a face-up table card once your
 
 The host can **Pause** an active round and **Resume** it. Pause freezes plays, pickups, jump-ins, and bot turns. Players can still reconnect, leave, read Table Talk, inspect the scoreboard, and review the last move while the table is paused.
 
+Once the whole round finishes, each player can choose **Reveal my blind cards** in their hand panel. This privately shows the three original blind cards from their deal, including cards they already played. It sends no public message and does not change the game. Hide them again with the same button; a rematch resets the reveal. Rounds dealt before this feature can show only blind cards still remaining at the end.
+
 ## Table layout and Table Talk
 
 The table adapts to the available browser width and height, including when zooming to 130–150%. During a round, decorative content gives way to the table and hand controls. Large hands scroll within the hand area instead of pushing the play buttons down the page. On narrow screens, Table Talk is available from the speech-bubble button in the top bar.

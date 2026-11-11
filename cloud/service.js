@@ -211,7 +211,7 @@ async function tk_dispatch(pool, request) {
         tk_host(game, id); E.tk_require(game.status === 'finished', 'Finish this round before starting a rematch.');
         game.paused = false; game.lastMove = null; game.recentCards = [];
         game.status = 'lobby'; game.turnId = null; game.deck = []; game.pile = []; game.hole = []; game.openingRank = null; game.results = [];
-        for (const player of game.players) { player.hand = []; player.up = []; player.down = []; player.finish = null; player.ready = player.bot || player.id === id; }
+        for (const player of game.players) { player.hand = []; player.up = []; player.down = []; player.dealtDown = []; player.finish = null; player.ready = player.bot || player.id === id; }
         E.tk_touch(game, 'Rematch! Seats stay the same. Get ready for a new deal.', 'lobby', id); break;
       case 'leave': {
         const name = game.players[index].name;

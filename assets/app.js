@@ -9,7 +9,7 @@
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
-  let pendingQuickPlay = null, pendingKick = null, managePlayersMarkup = '', pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
+  let pendingQuickPlay = null, pendingKick = null, managePlayersMarkup = '', ownBlindRevealed = false, pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
   let draftName = store.get('nickname') || '', draftRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
@@ -67,7 +67,7 @@
   function clearCredentials() {
     dismissMatching();
     pileHistoryOpen=false;pileHistoryHovered=false;replaySnapshot=null;
-    pendingKick=null;
+    pendingKick=null;ownBlindRevealed=false;
     ['scoreboard-dialog','replay-dialog','players-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
     if(credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
@@ -76,6 +76,7 @@
   function applyState(state) {
     if(!state || (game && game.room===state.room && state.version<game.version)) return;
     const wasTurn=myTurn(), oldStatus=game?.status, oldPhase=currentSource(), wasOffline=$('#connection').classList.contains('offline');
+    if(!game || game.room!==state.room || game.round!==state.round || state.status!=='finished')ownBlindRevealed=false;
     if(game && (game.room!==state.room || game.round!==state.round || state.status!=='playing')){pileHistoryOpen=false;pileHistoryHovered=false;}
     game=state; setConnection(true);
     if(pendingQuickPlay && (game.room!==pendingQuickPlay.room || game.version!==pendingQuickPlay.version || !myTurn() || currentSource()!=='hand'))dismissMatching();
@@ -222,7 +223,12 @@
   function renderHand() {
     const p=me();if(!p)return;
     if(game.status==='lobby'){$('#hand-panel').classList.remove('jump-ready');$('#hand-panel').innerHTML='<div class="hand-heading"><strong>YOUR HAND</strong><span>WAITING FOR THE DEAL</span></div><div class="locked-hint">No swaps. You play the cards you’re dealt.<br>Get ready when you’re happy with your seat.</div>';return;}
-    if(p.finish){$('#hand-panel').classList.remove('jump-ready');$('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${ordinal(p.finish).toUpperCase()} PLACE</strong><span>${game.status==='finished'?'ROUND COMPLETE':'YOU’RE OUT'}</span></div><div class="locked-hint">${p.finish===game.players.length?'The Troika this round. Time for a comeback.':'All clear. Sit back and watch the rest of the table.'}</div>`;return;}
+    if(p.finish){
+      const blindCards=game.status==='finished'?publicFaces(game.ownBlindCards):[];
+      $('#hand-panel').classList.remove('jump-ready');
+      $('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${ordinal(p.finish).toUpperCase()} PLACE</strong><span>${game.status==='finished'?'ROUND COMPLETE':'YOU’RE OUT'}</span></div>${blindCards.length?`<div class="blind-reveal-area"><div id="private-blind-cards" class="blind-reveal-cards" aria-label="Your blind cards from this deal">${blindCards.map(c=>ownBlindRevealed?cardHTML(c):backHTML()).join('')}</div><div class="blind-reveal-actions"><button type="button" class="secondary" id="reveal-blind-button" aria-controls="private-blind-cards" aria-expanded="${ownBlindRevealed}">${ownBlindRevealed?'Hide my blind cards':'Reveal my blind cards'}</button><p class="small-note muted">Your blind cards from this deal.<br>Only you can see this reveal.</p></div></div>`:`<div class="locked-hint">${p.finish===game.players.length?'The Troika this round. Time for a comeback.':'All clear. Sit back and watch the rest of the table.'}</div>`}`;
+      return;
+    }
     const source=p.phase==='out'?'hand':p.phase,turn=myTurn(),jump=!turn&&hasJump();
     $('#hand-panel').classList.toggle('jump-ready',jump);
     const cards=source==='down'?p.downSlots.map(id=>backHTML(id,turn,selected.includes(id))).join(''):(p[source]||[]).map(c=>cardHTML(c,{button:true,disabled:!turn&&!canJump(c.id,source),source,selectedCard:selected.includes(c.id),canPlay:turn?legal(c):jump?canJump(c.id,source):null})).join('');
@@ -407,6 +413,10 @@
   });
   document.addEventListener('click',async e=>{
     const target=e.target.closest('button');if(!target)return;
+    if(target.id==='reveal-blind-button'){
+      if(game?.status==='finished'&&publicFaces(game.ownBlindCards).length){ownBlindRevealed=!ownBlindRevealed;renderHand();$('#reveal-blind-button').focus({preventScroll:true});}
+      return;
+    }
     if(target.id==='players-button'){if(host()){pendingKick=null;renderManagePlayers();$('#players-dialog').showModal();}return;}
     if(target.classList.contains('close-players-dialog')){$('#players-dialog').close();pendingKick=null;return;}
     if(target.dataset.kickPlayer){if(host()){pendingKick=target.dataset.kickPlayer;renderManagePlayers();$('#confirm-kick')?.focus();}return;}

@@ -49,6 +49,35 @@ function allCards(array $g): array {
 }
 
 try {
+    $reveal=tk_new_game('PEEK',tk_new_player('Ada',0,true));
+    $reveal['players'][]=tk_new_player('Boris',1,true);
+    $reveal['players'][]=tk_new_player('Cleo',2,true);
+    tk_start($reveal);
+    $snapshots=array_column($reveal['players'],'dealtDown');
+    check(count(allCards($reveal))===52,'archived blind cards do not add live cards');
+    foreach($reveal['players'] as $p) {
+        check(count($p['dealtDown'])===3 && $p['dealtDown']===$p['down'],'each original three-card blind deal is archived');
+        $view=tk_view($reveal,$p['id']);
+        check($view['ownBlindCards']===[],'blind archives stay private while the game is playing');
+        foreach($view['players'] as $public) check(!isset($public['dealtDown']) && !isset($public['down']),'public player rows omit all blind faces and archives');
+    }
+    $reveal['players'][0]['down'][0]['rank']=99;
+    check($reveal['players'][0]['dealtDown']===$snapshots[0],'live blind-card changes cannot mutate the deal archive');
+    $reveal['players'][0]['finish']=1;$reveal['players'][0]['down']=[];
+    check(tk_view($reveal,$reveal['players'][0]['id'])['ownBlindCards']===[],'a personal finish cannot unlock the archive before the table finishes');
+    $reveal['status']='finished';$reveal['turnId']=null;
+    foreach($reveal['players'] as $i=>$p) check(tk_view($reveal,$p['id'])['ownBlindCards']===$snapshots[$i],'finished-round views reveal only the requesting player original blind deal');
+    $view=tk_view($reveal,$reveal['players'][0]['id']);$view['ownBlindCards'][0]['rank']=99;
+    check($reveal['players'][0]['dealtDown']===$snapshots[0],'editing a reveal response cannot mutate its archive');
+    check(tk_view($reveal,'unknown-player')['ownBlindCards']===[],'unknown viewer has no blind-card archive');
+    $reveal['status']='lobby';
+    check(tk_view($reveal,$reveal['players'][0]['id'])['ownBlindCards']===[],'lobby hides prior-round blind cards');
+    tk_start($reveal);
+    foreach($reveal['players'] as $i=>$p) check($p['dealtDown']===$p['down'] && !array_intersect(array_column($p['dealtDown'],'id'),array_column($snapshots[$i],'id')),'fresh deal replaces the prior blind archive');
+    foreach($reveal['players'] as &$p) unset($p['dealtDown']);unset($p);
+    $reveal['status']='finished';$reveal['turnId']=null;
+    foreach($reveal['players'] as $p) check(tk_view($reveal,$p['id'])['ownBlindCards']===$p['down'],'legacy finished rounds fall back to the requesting player remaining blind cards');
+
     foreach ([2, 5, 7, 9, 11, 12, 13, 14] as $rank) {
         check(tk_can_play(card($rank), [card($rank)]), 'equal rank is playable');
     }

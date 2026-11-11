@@ -132,6 +132,8 @@ function tk_start(array &$g): void {
     } unset($p);
     foreach (['down','up','hand'] as $zone) for($n=0;$n<3;$n++) foreach ($g['players'] as &$p) $p[$zone][]=array_pop($deck);
     unset($p);
+    foreach ($g['players'] as &$p) $p['dealtDown']=$p['down'];
+    unset($p);
     $minimum=15; $starter=null;
     foreach ($g['players'] as &$p) {
         tk_sort_hand($p);
@@ -307,8 +309,9 @@ function tk_view(array $g,string $youId): array {
         'players'=>[],'turnId'=>$g['turnId'],'deckCount'=>count($g['deck']),'pile'=>$g['pile'],
         'holeCount'=>count($g['hole']),'openingRank'=>$g['openingRank'],'results'=>$g['results'],
         'events'=>$g['events'],'version'=>$g['version'],'round'=>$g['round'],
-        'paused'=>$g['paused'],'jumpCards'=>tk_jump_cards($g,$youId),'scoreboard'=>$scores,'lastMove'=>$g['lastMove'],'recentCards'=>$g['recentCards']];
+        'paused'=>$g['paused'],'jumpCards'=>tk_jump_cards($g,$youId),'scoreboard'=>$scores,'lastMove'=>$g['lastMove'],'recentCards'=>$g['recentCards'],'ownBlindCards'=>[]];
     foreach($g['players'] as $p) {
+        if($g['status']==='finished' && $p['id']===$youId) $out['ownBlindCards']=$p['dealtDown']??$p['down'];
         $out['players'][]=['id'=>$p['id'],'name'=>$p['name'],'seat'=>$p['seat'],'bot'=>$p['bot'],'ready'=>$p['ready'],
             'connected'=>$p['bot'] || tk_now()-$p['lastSeen']<25,'disconnectedFor'=>$p['bot']?0:max(0,(int)(tk_now()-$p['lastSeen'])),
             'handCount'=>count($p['hand']),'hand'=>$p['id']===$youId?$p['hand']:null,

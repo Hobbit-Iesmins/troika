@@ -397,3 +397,14 @@ body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .ex
   #players-dialog .dialog-heading h2{font-size:25px}
 }
 @media(max-height:520px){#players-dialog{padding:16px}.manage-player{padding:8px 0}.kick-confirm{padding:10px}}
+
+/* A private, optional peek once the entire round is over. */
+.blind-reveal-area{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px 18px;margin-top:12px}
+.blind-reveal-cards{display:flex;align-items:center;justify-content:center;gap:7px}
+.blind-reveal-cards>.card,.blind-reveal-cards>.card-back{width:48px;height:68px}
+.blind-reveal-cards .card .corner{font-size:12px;left:4px;top:4px}
+.blind-reveal-cards .card .corner.bottom{right:4px;bottom:4px}
+.blind-reveal-cards .card .pip{font-size:25px}
+.blind-reveal-actions{max-width:200px;text-align:center}
+.blind-reveal-actions .secondary{font-size:11px;padding:9px 12px;min-height:34px}
+.blind-reveal-actions p{font-size:10px;line-height:1.5;margin:6px 0 0}

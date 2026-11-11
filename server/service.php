@@ -157,7 +157,7 @@ function tk_dispatch(PDO $db,array $request): array {
                 tk_host($g,$id); tk_require($g['status']==='finished','Finish this round before starting a rematch.');
                 $g['paused']=false;$g['lastMove']=null;$g['recentCards']=[];
                 $g['status']='lobby'; $g['turnId']=null; $g['deck']=[]; $g['pile']=[]; $g['hole']=[]; $g['openingRank']=null; $g['results']=[];
-                foreach($g['players'] as &$p) { $p['hand']=[]; $p['up']=[]; $p['down']=[]; $p['finish']=null; $p['ready']=$p['bot']||$p['id']===$id; } unset($p);
+                foreach($g['players'] as &$p) { $p['hand']=[]; $p['up']=[]; $p['down']=[]; $p['dealtDown']=[]; $p['finish']=null; $p['ready']=$p['bot']||$p['id']===$id; } unset($p);
                 tk_touch($g,'Rematch! Seats stay the same. Get ready for a new deal.','lobby',$id); break;
             case 'leave':
                 $name=$g['players'][$i]['name'];

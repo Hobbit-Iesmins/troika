@@ -122,6 +122,40 @@ test('public views hide private cards, tokens and deck and are independent deep 
   assert.equal(own.hand[0].rank,3);assert.equal(other.up[0].rank,7);assert.equal(g.settings.maxPlayers,5);
 });
 
+test('blind deal snapshots stay private until the entire round finishes, then each player sees only their own',()=>{
+  const g=fixture(),snapshots=g.players.map(p=>structuredClone(p.dealtDown));
+  assert.ok(snapshots.every(cards=>cards.length===3));
+  for(const p of g.players){
+    assert.deepEqual(e.tk_view(g,p.id).ownBlindCards,[]);
+    for(const visible of e.tk_view(g,p.id).players){assert.ok(!('dealtDown' in visible));assert.ok(!('down' in visible));}
+  }
+  g.players[0].finish=1;g.players[0].down=[];
+  assert.deepEqual(e.tk_view(g,g.players[0].id).ownBlindCards,[],'finishing personally does not unlock a peek while others play');
+  g.status='finished';g.turnId=null;
+  for(let i=0;i<g.players.length;i++)assert.deepEqual(e.tk_view(g,g.players[i].id).ownBlindCards,snapshots[i]);
+  const view=e.tk_view(g,g.players[0].id);view.ownBlindCards[0].rank=99;
+  assert.deepEqual(g.players[0].dealtDown,snapshots[0],'response mutation cannot change the stored snapshot');
+  assert.deepEqual(e.tk_view(g,'unknown-player').ownBlindCards,[]);
+});
+
+test('blind archives are independent deal snapshots and are replaced for a new round',()=>{
+  const g=e.tk_new_game('DEALX',e.tk_new_player('Ada',0,true));g.players.push(e.tk_new_player('Boris',1,true));e.tk_start(g);
+  const p=g.players[0],snapshot=structuredClone(p.down),oldIds=p.dealtDown.map(c=>c.id);
+  assert.deepEqual(p.dealtDown,p.down);assert.notEqual(p.dealtDown,p.down);assert.notEqual(p.dealtDown[0],p.down[0]);
+  assert.equal(ids(g).length,52,'archive copies do not become live cards');
+  p.down[0].rank=99;p.down.pop();assert.deepEqual(p.dealtDown,snapshot);
+  g.status='lobby';assert.deepEqual(e.tk_view(g,p.id).ownBlindCards,[]);e.tk_start(g);
+  assert.deepEqual(p.dealtDown,p.down);assert.ok(p.dealtDown.every(c=>!oldIds.includes(c.id)));
+  assert.deepEqual(e.tk_view(g,p.id).ownBlindCards,[]);
+});
+
+test('legacy finished rounds reveal only the requesting player remaining blind cards',()=>{
+  const g=fixture();g.status='finished';g.turnId=null;
+  for(const p of g.players)delete p.dealtDown;
+  for(const p of g.players)assert.deepEqual(e.tk_view(g,p.id).ownBlindCards,p.down);
+  g.status='playing';assert.deepEqual(e.tk_view(g,g.players[0].id).ownBlindCards,[]);
+});
+
 test('scoreboard records each finished round once and replay clears when a new round starts',()=>{
   const g=fixture();for(const p of g.players){p.hand=[card(2)];p.up=[];p.down=[];p.stats={burns:2,pickups:3};}
   const winner=g.players[0].id;play(g);play(g,1);
