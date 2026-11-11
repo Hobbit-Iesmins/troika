@@ -1,7 +1,7 @@
 'use strict';
 const { randomBytes, randomInt, createHash, timingSafeEqual } = require('node:crypto');
 const E = require('./engine.js');
-const { StorageError } = require('./database.js');
+const { StorageError, storageError } = require('./database.js');
 const initialized = new WeakMap();
 const SQL_SCHEMA = `CREATE TABLE IF NOT EXISTS troika_rooms (
   code TEXT PRIMARY KEY,
@@ -10,13 +10,13 @@ const SQL_SCHEMA = `CREATE TABLE IF NOT EXISTS troika_rooms (
 )`;
 async function query(client, sql, values) {
   try { return await client.query(sql, values); }
-  catch { throw new StorageError(); }
+  catch (error) { throw storageError(error); }
 }
 function initDatabase(pool) {
   if (!initialized.has(pool)) {
     const pending = (async () => {
       let client;
-      try { client = await pool.connect(); } catch { throw new StorageError(); }
+      try { client = await pool.connect(); } catch (error) { throw storageError(error); }
       let transaction = false;
       try {
         await query(client, 'BEGIN'); transaction = true;
@@ -87,7 +87,7 @@ async function tk_dispatch(pool, request) {
   E.tk_require(typeof action === 'string', 'Choose a valid action.');
   await initDatabase(pool);
   let client;
-  try { client = await pool.connect(); } catch { throw new StorageError(); }
+  try { client = await pool.connect(); } catch (error) { throw storageError(error); }
   let transaction = false;
   try {
     await query(client, 'BEGIN'); transaction = true;

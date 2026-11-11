@@ -51,7 +51,7 @@ function createHandler(options = {}) {
       respond(res, 200, result);
     } catch (error) {
       if (error instanceof GameError) respond(res, error.status || 400, { error: error.message });
-      else if (error instanceof StorageError) { console.error('Troika: database request unavailable.'); respond(res, 503, { error: error.message }); }
+      else if (error instanceof StorageError) { console.error('Troika: database request unavailable.', error.code); respond(res, 503, { error: error.message, code: error.code }); }
       else { console.error('Troika: request could not be processed.'); respond(res, 500, { error: 'The game could not process that action. Try again.' }); }
     }
   };

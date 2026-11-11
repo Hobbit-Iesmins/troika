@@ -2,11 +2,30 @@
 
 /** Durable shared storage. A pool caches connections, never room state. */
 class StorageError extends Error {
-  constructor(message = 'Game storage is unavailable. Check the PostgreSQL connection and retry.') {
+  constructor(message = 'Game storage is unavailable. Check the PostgreSQL connection and retry.', code = 'DB_UNAVAILABLE') {
     super(message);
     this.name = 'StorageError';
     this.status = 503;
+    this.code = code;
   }
+}
+// Return only fixed diagnostics: never database URLs, usernames, passwords or SQL.
+function storageError(error) {
+  if(error instanceof StorageError)return error;
+  const code=String(error?.code||'');
+  const text=String(error?.message||'');
+  if(['SELF_SIGNED_CERT_IN_CHAIN','DEPTH_ZERO_SELF_SIGNED_CERT','UNABLE_TO_VERIFY_LEAF_SIGNATURE','UNABLE_TO_GET_ISSUER_CERT_LOCALLY','ERR_TLS_CERT_ALTNAME_INVALID','CERT_HAS_EXPIRED'].includes(code))
+    return new StorageError('Database TLS certificate verification failed. The host needs to configure the Supabase CA certificate.','DB_TLS_CERTIFICATE');
+  if(code==='28P01'||/password authentication failed/i.test(text))
+    return new StorageError('Database login failed. Check the database password in DATABASE_URL, then redeploy.','DB_AUTH_FAILED');
+  if(/tenant or user not found/i.test(text))
+    return new StorageError('Supabase could not find this database user. Copy the complete Transaction pooler URI again, including its postgres.project-reference username.','DB_POOLER_USER');
+  if(['ENOTFOUND','EAI_AGAIN'].includes(code))return new StorageError('Database hostname could not be resolved. Check the host in DATABASE_URL.','DB_DNS');
+  if(['ENETUNREACH','EHOSTUNREACH','ECONNREFUSED'].includes(code))return new StorageError('Database connection is unreachable. Check the Supabase pooler address and project status.','DB_NETWORK');
+  if(['ETIMEDOUT','ECONNRESET','57P03','53300'].includes(code)||/timeout|timed out/i.test(text))return new StorageError('Database connection timed out. Check the Supabase project status and connection limits.','DB_TIMEOUT');
+  if(code==='42501')return new StorageError('Database user lacks permission to create or update the game table.','DB_PERMISSION');
+  if(code==='3D000')return new StorageError('The database name in DATABASE_URL was not found.','DB_NAME');
+  return new StorageError();
 }
 let sharedPool;
 function poolConfig(env = process.env) {
@@ -47,4 +66,4 @@ async function closePool() {
   sharedPool = undefined;
   if (pool) await pool.end();
 }
-module.exports = { getPool, closePool, poolConfig, StorageError };
+module.exports = { getPool, closePool, poolConfig, StorageError, storageError };

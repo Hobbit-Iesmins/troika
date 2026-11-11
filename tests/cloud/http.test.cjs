@@ -38,3 +38,12 @@ test('database configuration requires verified hosted TLS and preserves provider
  assert.equal(provider.searchParams.get('sslmode'),'verify-full');assert.equal(provider.searchParams.get('sslrootcert'),'/provider/root.pem');assert.equal(provider.searchParams.get('sslcert'),'/provider/client.pem');assert.equal(provider.searchParams.get('sslkey'),'/provider/client.key');
  assert.throws(()=>poolConfig({}),StorageError);assert.throws(()=>poolConfig({DATABASE_URL:'https://db.example.test'}),StorageError);
 });
+
+test('database diagnostics classify causes without exposing credentials or raw messages',async()=>{
+ const {storageError}=require('../../cloud/database.js');
+ for(const [code,expected] of [['28P01','DB_AUTH_FAILED'],['SELF_SIGNED_CERT_IN_CHAIN','DB_TLS_CERTIFICATE'],['ENOTFOUND','DB_DNS'],['ENETUNREACH','DB_NETWORK'],['42501','DB_PERMISSION']]){
+  const error=storageError({code,message:'postgres://secret:password@private.example/db'});assert.equal(error.code,expected);assert.ok(!error.message.includes('secret'));assert.ok(!error.message.includes('private.example'));
+  const response=await invoke({dispatch:async()=>{throw error;}},{body:{action:'state'}});assert.equal(response.status,503);assert.equal(response.body.code,expected);
+ }
+ assert.equal(storageError({message:'Tenant or user not found'}).code,'DB_POOLER_USER');assert.equal(storageError(new Error('password=secret unknown failure')).code,'DB_UNAVAILABLE');
+});
