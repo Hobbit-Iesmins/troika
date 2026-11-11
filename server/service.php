@@ -45,6 +45,7 @@ function tk_auth(array $g,$token): string {
 function tk_host(array $g,string $id): void { tk_require($g['hostId']===$id,'Only the host can do that.'); }
 function tk_lobby(array $g): void { tk_require($g['status']==='lobby','Seats can only change before a round starts.'); }
 function tk_save(PDO $db,array $g): void {
+    tk_session_init($g);
     $q=$db->prepare('INSERT INTO rooms(code,state,updated) VALUES(?,?,?) ON CONFLICT(code) DO UPDATE SET state=excluded.state, updated=excluded.updated');
     $q->execute([$g['room'],json_encode($g,JSON_THROW_ON_ERROR),tk_now()]);
 }
@@ -54,7 +55,7 @@ function tk_dispatch(PDO $db,array $request): array {
     $db->exec('BEGIN IMMEDIATE');
     try {
         if ($action==='create') {
-            $settings=tk_settings(array_intersect_key($request,array_flip(['mode','maxPlayers','decks','burnRule'])));
+            $settings=tk_settings(array_intersect_key($request,array_flip(['mode','maxPlayers','decks','burnRule','jumpIn'])));
             $name=tk_nickname($request['nickname']??null); $seat=tk_seat($request['seat']??0,$settings['maxPlayers']);
             $token=bin2hex(random_bytes(24)); $player=tk_new_player($name,$seat,false,hash('sha256',$token));
             do {
@@ -73,6 +74,7 @@ function tk_dispatch(PDO $db,array $request): array {
         $q=$db->prepare('SELECT state FROM rooms WHERE code=?'); $q->execute([$room]); $raw=$q->fetchColumn();
         tk_require($raw!==false,'Table not found. Check the code or create a new table.');
         $g=json_decode($raw,true,512,JSON_THROW_ON_ERROR);
+        tk_session_init($g);
         $g['settings']=tk_game_settings($g); $capacity=$g['settings']['maxPlayers'];
         if ($action==='join') {
             tk_lobby($g); tk_require(count($g['players'])<$capacity,'This table is full.');
@@ -92,6 +94,16 @@ function tk_dispatch(PDO $db,array $request): array {
         $id=tk_auth($g,$request['token']??null); $i=tk_index($g,$id); $g['players'][$i]['lastSeen']=tk_now();
         switch($action) {
             case 'state': break;
+            case 'pause':
+                tk_host($g,$id);tk_require($g['status']==='playing','Pause is available during a round.');
+                tk_require(isset($request['paused'])&&is_bool($request['paused']),'Choose pause or resume.');
+                if($g['paused']!==$request['paused']){
+                    $g['paused']=$request['paused'];$g['botAt']=tk_now()+0.85;
+                    tk_touch($g,$g['players'][$i]['name'].($g['paused']?' paused the round.':' resumed the round.'),'pause',$id);
+                }break;
+            case 'jump':
+                tk_require(isset($request['source'],$request['card'],$request['version'])&&is_string($request['source'])&&is_string($request['card'])&&is_int($request['version']),'Choose a valid jump-in card and table version.');
+                tk_jump_in($g,$id,$request['source'],$request['card'],$request['version']);break;
             case 'seat':
                 tk_lobby($g); $seat=tk_seat($request['seat']??null,$capacity); tk_free_seat($g,$seat,$id);
                 $g['players'][$i]['seat']=$seat; $g['players'][$i]['ready']=$id===$g['hostId'];
@@ -127,6 +139,7 @@ function tk_dispatch(PDO $db,array $request): array {
                 } unset($p); tk_require($found,'Choose an occupied seat.'); break;
             case 'rematch':
                 tk_host($g,$id); tk_require($g['status']==='finished','Finish this round before starting a rematch.');
+                $g['paused']=false;$g['lastMove']=null;$g['recentCards']=[];
                 $g['status']='lobby'; $g['turnId']=null; $g['deck']=[]; $g['pile']=[]; $g['hole']=[]; $g['openingRank']=null; $g['results']=[];
                 foreach($g['players'] as &$p) { $p['hand']=[]; $p['up']=[]; $p['down']=[]; $p['finish']=null; $p['ready']=$p['bot']||$p['id']===$id; } unset($p);
                 tk_touch($g,'Rematch! Seats stay the same. Get ready for a new deal.','lobby',$id); break;
@@ -142,7 +155,7 @@ function tk_dispatch(PDO $db,array $request): array {
             default: throw new RuntimeException('Unknown game action.');
         }
         // Polling drives at most one bot turn. A persisted timer keeps all clients in sync.
-        if($g['status']==='playing' && tk_now()>=$g['botAt']) tk_bot_step($g);
+        if($g['status']==='playing' && !$g['paused'] && tk_now()>=$g['botAt']) tk_bot_step($g);
         tk_save($db,$g); $db->exec('COMMIT'); return ['state'=>tk_view($g,$id)];
     } catch(Throwable $e) {
         try { $db->exec('ROLLBACK'); } catch(Throwable $ignored) {}
