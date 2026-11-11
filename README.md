@@ -26,7 +26,7 @@ Before creating a table, the host chooses:
 
 You do not need to fill every seat: a round can start with two ready players, and bots can occupy open seats. Every player still receives nine cards. A 12-seat table needs at least three decks because its deal uses 108 cards; two decks contain only 104. Selecting 12 seats raises the deck selection to three if needed and disables the two-deck option.
 
-The selected mode, capacity, and deck count stay fixed for the table and its rematches. Existing saved tables continue in Standard mode. Extra decks include repeated rank-and-suit faces, with each physical card tracked separately. Four consecutive matching ranks still burn the pile; play at most four matching cards in one action, then take the earned extra turn.
+The selected mode, capacity, and deck count stay fixed for the table and its rematches. Existing saved tables continue in Standard mode. Extra decks include repeated rank-and-suit faces, with each physical card tracked separately. Four-card burns follow the selected suit rule; play at most four matching cards in one action, then take any earned extra turn.
 
 ## Playing
 
@@ -46,11 +46,31 @@ The selected mode, capacity, and deck count stay fixed for the table and its rem
 
 Click cards once to select them, then use **Play card** as before. You can also double-click a playable card in your hand to play that specific card immediately. If other hand cards have the same rank, a small warning lets you play only the clicked card, play the matching group (up to four), or cancel. Suits do not affect the match. Face-up and blind cards still use the normal selection and Play button.
 
+## Optional jump-in burns
+
+Enable **Jump-in burns** before creating either a Standard or Expanded table. It is off by default and stays fixed for the table and its rematches.
+
+When it is enabled, an unfinished player may play **one card out of turn** if that card completes a valid four-card burn of the rank currently on top. The selected suit rule still applies: Any four needs the fourth matching rank; All four suits needs the missing suit that completes ♠ ♥ ♦ ♣ in that uninterrupted rank run. The pile burns and the jumping player takes the next turn, unless that play finishes them.
+
+Eligible cards glow gold. Select one and click **Jump in & burn**, or double-click an eligible hand card to jump immediately.
+
+Use a card from your current phase: your hand, or a face-up table card once your hand and draw deck are empty. Blind cards cannot jump in, and a 10 cannot be used as an unrelated out-of-turn burn. Jumping in is unavailable before the opening card or while paused. If several players react, the server accepts the first valid action; a stale attempt leaves the cards untouched. Bots follow these same rules.
+
+## Scoreboard, replay, and pause
+
+**Scoreboard** tracks completed rounds at this table: rounds played, wins, last-place finishes, burns, and pile pickups. Totals stay across rematches, including rows for players who leave. Current-round card statistics remain separate until the round finishes. Existing saved games start collecting scores from completed rounds after the update; earlier scores are not invented.
+
+**Replay** shows the latest move's public cards, the pile before and after, and the reason for a burn or extra turn. It does not reveal another player's hand, the draw deck, or unattempted blind cards.
+
+The host can **Pause** an active round and **Resume** it. Pause freezes plays, pickups, jump-ins, and bot turns. Players can still reconnect, leave, read Table Talk, inspect the scoreboard, and review the last move while the table is paused.
+
 ## Table layout and Table Talk
 
 The table adapts to the available browser width and height, including when zooming to 130–150%. During a round, decorative content gives way to the table and hand controls. Large hands scroll within the hand area instead of pushing the play buttons down the page. On narrow screens, Table Talk is available from the speech-bubble button in the top bar.
 
 Table Talk shows each played or revealed card with its rank and suit, including grouped plays and cards that burn the pile. Hearts and diamonds use red symbols. Older saved events keep their original text without guessing a suit.
+
+Hover over or focus the middle playing pile to inspect the last ten played or revealed cards; touch users can open the same history by tapping the pile. This history survives burns and pickups and clears for a new round. It contains only cards that have been made public.
 
 To update an existing MAMP installation, replace the game files in the same folder and refresh the browser. The versioned CSS and JavaScript links load the updated interface. Matches remain in the separate SQLite storage folder.
 
@@ -72,9 +92,10 @@ From the game folder, run:
 php tests/engine-test.php
 php tests/service-test.php
 php tests/burn-rule-test.php
+php tests/session-test.php
 ```
 
-The first checks rules and automated matches, including card conservation in Standard and Expanded games. The second checks table settings, seating, authorization, private hands, rollback, disconnected-player takeover, and rematches using an isolated in-memory SQLite database. The test suite needs PHP 8 with PDO SQLite. Neither suite touches saved tables.
+The first checks rules and automated matches, including card conservation in Standard and Expanded games. The second checks table settings, seating, authorization, private hands, rollback, disconnected-player takeover, and rematches using an isolated in-memory SQLite database. The session checks cover jump-ins, pause, cumulative scores, and public move history. The test suite needs PHP 8 with PDO SQLite. These checks use isolated fixtures and do not touch saved tables.
 
 For optional DOM integration checks, install `jsdom` into a separate development folder, then run `node tests/ui-test.cjs` with that folder’s `node_modules` in `NODE_PATH`. Set `PHP_BIN` if PHP is not on your command path. This suite connects the page’s actual event handlers to the PHP service through a CLI bridge and uses a temporary SQLite database; it does not launch a browser or web server. These tools are only needed for development, not for playing Troika.
 
