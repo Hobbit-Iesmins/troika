@@ -368,3 +368,32 @@ body[data-game-status="playing"][data-paused="false"][data-your-turn="true"] .ex
 @media(prefers-reduced-motion:reduce){
   body[data-your-turn="true"] .hand-panel{animation:none}
 }
+
+/* Host controls stay within the heading at narrow widths and browser zoom. */
+.session-tools{flex:0 1 auto;flex-wrap:wrap;max-width:100%}
+.session-tools button{min-width:0;max-width:100%;flex-shrink:0}
+
+#players-dialog{max-width:470px;max-height:80dvh;overflow:auto;scrollbar-width:thin;padding:22px}
+#players-content{min-width:0;padding-top:8px}
+.manage-player{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.manage-player:last-child{border-bottom:0}
+.manage-player .small-avatar{width:29px;height:29px;font-size:14px}
+.manage-player-info{flex:1;min-width:0}
+.manage-player-info strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.4;font-weight:normal;color:var(--text)}
+.manage-player-info small{display:block;margin-top:3px;font-size:10px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.manage-player .kick-player{flex:0 0 auto;width:auto;min-width:58px;min-height:32px;padding:7px 10px;font-size:11px}
+.manage-player .kick-player:hover:not(:disabled){border-color:var(--red);color:var(--red)}
+.kick-confirm{margin:3px 0 10px;padding:12px;border:1px solid var(--red);border-radius:6px;background:var(--panel2)}
+.kick-confirm p{margin:0 0 10px;font-size:11px;line-height:1.6;color:var(--text);overflow-wrap:anywhere}
+.kick-actions{display:flex;flex-wrap:wrap;gap:8px}
+.kick-actions button{flex:1 1 110px;min-width:0;min-height:34px;width:auto;padding:8px 10px;font-size:11px;line-height:1.4}
+.danger-button{border:1px solid var(--red);border-radius:5px;background:var(--red);color:#fff;font-weight:bold}
+.danger-button:hover:not(:disabled){filter:brightness(1.12)}
+@media(max-width:759px){
+  .content-heading{flex-wrap:wrap}
+  .session-tools{flex:1 1 190px}
+  #players-dialog{padding:17px}
+  #players-dialog .dialog-heading{gap:10px}
+  #players-dialog .dialog-heading h2{font-size:25px}
+}
+@media(max-height:520px){#players-dialog{padding:16px}.manage-player{padding:8px 0}.kick-confirm{padding:10px}}

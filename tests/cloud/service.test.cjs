@@ -100,6 +100,50 @@ dbTest('disconnect takeover invalidates the old player key',async()=>{
   await assert.rejects(()=>req('state',auths[1]),err=>err.status===401);
 });
 
+dbTest('host kicks a lobby player by ID, frees their seat, and rejects unauthorized or stale targets',async()=>{
+  const host=await req('create',{}, {nickname:'Kick host',seat:4}),h=auth(host);
+  const guest=await req('join',{room:host.room},{nickname:'Guest',seat:1}),a=auth(guest),target=guest.state.youId;
+  await req('bot',h,{seat:2});const before=await load(host.room),bot=before.players.find(p=>p.bot);
+  await assert.rejects(()=>req('kick',a,{playerId:host.state.youId}),err=>err.status===403);
+  for(const playerId of [undefined,null,1,{},'',target+'x','f'.repeat(24),host.state.youId,bot.id]) {
+    await assert.rejects(()=>req('kick',h,{playerId}));assert.deepEqual(await load(host.room),before);
+  }
+  const kicked=(await req('kick',h,{playerId:target})).state;
+  assert.equal(kicked.players.length,2);assert.equal(kicked.players.some(p=>p.id===target),false);assert.equal(kicked.hostId,host.state.youId);
+  assert.equal(kicked.events.at(-1).text,'Kick host kicked Guest from the table.');
+  await assert.rejects(()=>req('state',a),err=>err.status===401);
+  const replacement=await req('join',{room:host.room},{nickname:'Replacement',seat:1});
+  const after=await load(host.room);await assert.rejects(()=>req('kick',h,{playerId:target}));assert.deepEqual(await load(host.room),after);
+  assert.equal((await req('state',auth(replacement))).state.youId,replacement.state.youId);
+});
+
+dbTest('host can kick connected or offline players during active or paused rounds without losing cards',async()=>{
+  for(const paused of [false,true])for(const offline of [false,true]) {
+    const {g,auths}=await fixture({jumpIn:false});g.paused=paused;g.turnId=g.players[1].id;g.botAt=0;
+    g.players[1].lastSeen=offline?0:e.tk_now();await save(g);
+    const target=structuredClone(g.players[1]),cards=ids(g),turn=g.turnId,before=e.tk_now();
+    const kicked=(await req('kick',auths[0],{playerId:target.id})).state,stored=await load(g.room),player=stored.players[1];
+    assert.deepEqual(player,{...target,bot:true,tokenHash:'',ready:true});assert.deepEqual(ids(stored),cards);assert.equal(stored.turnId,turn);assert.equal(stored.paused,paused);
+    assert.ok(stored.botAt>=before+0.85);assert.equal(kicked.events.at(-1).text,'Ada kicked Boris; a bot takes over.');
+    assert.equal(kicked.players[1].hand,null);await assert.rejects(()=>req('state',auths[1]),err=>err.status===401);
+    const snapshot=await load(g.room);await assert.rejects(()=>req('kick',auths[0],{playerId:target.id}));assert.deepEqual(await load(g.room),snapshot);
+    stored.botAt=0;await save(stored);await req('state',auths[0]);const progressed=await load(g.room);
+    if(paused){assert.deepEqual(progressed.players[1],player);assert.equal(progressed.turnId,turn);}
+    else assert.equal(progressed.lastMove.playerId,target.id,'bot resumes kicked player turn on a later poll');
+    assert.deepEqual(ids(progressed),cards);
+  }
+});
+
+dbTest('kicking after a finished round keeps results and scoreboard intact and revokes the old key',async()=>{
+  const {g,auths}=await fixture();g.status='finished';g.turnId=null;g.results=g.players.map(p=>p.id);
+  g.players.forEach((p,i)=>p.finish=i+1);e.tk_record_scores(g);await save(g);
+  const scores=structuredClone(g.scoreboard),results=[...g.results],target=g.players[1];
+  const view=(await req('kick',auths[0],{playerId:target.id})).state;
+  assert.equal(view.players.find(p=>p.id===target.id).bot,true);assert.deepEqual(view.results,results);assert.deepEqual((await load(g.room)).scoreboard,{...scores,[target.id]:{...scores[target.id],bot:true}});
+  await assert.rejects(()=>req('state',auths[1]),err=>err.status===401);
+  const rematch=(await req('rematch',auths[0])).state;assert.equal(rematch.players.find(p=>p.id===target.id).bot,true);
+});
+
 dbTest('rematches keep settings and completed score exactly once but reset replay and history',async()=>{
   const {g,auths}=await fixture({jumpIn:true,burnRule:'all_suits'});g.pile=[];g.results=[];g.turnId=g.players[0].id;
   for(const p of g.players){p.hand=[card(2)];p.up=[];p.down=[];p.stats={burns:2,pickups:3};}

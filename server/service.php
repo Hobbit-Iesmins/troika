@@ -129,6 +129,22 @@ function tk_dispatch(PDO $db,array $request): array {
                 tk_require(isset($request['source']) && is_string($request['source']),'Choose a card source.');
                 tk_play($g,$id,$request['source'],$request['cards']); break;
             case 'pickup': tk_pickup($g,$id); break;
+            case 'kick':
+                tk_host($g,$id);
+                $playerId=$request['playerId']??null;
+                tk_require(is_string($playerId) && preg_match('/^[a-f0-9]{24}$/D',$playerId)===1,'Choose a player to kick.');
+                $found=null;
+                foreach($g['players'] as $j=>$p) if($p['id']===$playerId) { $found=$j; break; }
+                tk_require($found!==null,'That player has already left the table.');
+                $player=$g['players'][$found]; $name=$player['name']; $hostName=$g['players'][$i]['name'];
+                tk_require($player['id']!==$id,'You cannot kick yourself. Use Leave table instead.');
+                tk_require(!$player['bot'],'That seat is already controlled by a bot.');
+                if($g['status']==='lobby') array_splice($g['players'],$found,1);
+                else {
+                    $g['players'][$found]['bot']=true; $g['players'][$found]['tokenHash']=''; $g['players'][$found]['ready']=true;
+                    if($g['status']==='playing') $g['botAt']=tk_now()+0.85;
+                }
+                tk_touch($g,$hostName.' kicked '.$name.($g['status']==='lobby'?' from the table.':'; a bot takes over.'),'lobby',$player['id']); break;
             case 'replace_bot':
                 tk_host($g,$id); tk_require($g['status']==='playing','Bot takeover is available during a round.'); $seat=tk_seat($request['seat']??null,$capacity); $found=false;
                 foreach($g['players'] as &$p) if($p['seat']===$seat) {

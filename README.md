@@ -89,6 +89,8 @@ Your browser stores a private player token so refreshing or reopening the same p
 
 If someone disconnects, their seat and cards stay in the match so they can reconnect. After 30 seconds offline, the host can give their seat to a bot. That takeover ends the original player’s access to the seat. Leaving during a round also gives the seat to a bot so the game can continue.
 
+The host can also open **Players → Kick → Confirm kick** at any time, even while a player is connected or the table is paused. In the lobby, kicking frees the seat. During or after a round, a bot takes the seat while cards, turn order, and results stay intact. The kicked player's saved seat key stops working immediately. Guests cannot kick anyone, and the host cannot kick themselves.
+
 For the MAMP runtime, shared matches are stored in SQLite outside the website folder, under PHP’s temporary directory in a folder named `troika-<installation hash>`. Apache’s PHP process needs permission to create and write there. For a more permanent location, set the `TROIKA_DATA_DIR` environment variable to a writable folder outside the web document root. Old tables are cleaned up after seven days when a new table is created; clearing the temporary directory also removes saved matches.
 
 For local play, keep the MAMP installation on the lab LAN. The Vercel runtime stores shared matches in PostgreSQL and uses the deployed HTTPS domain. No external fonts or analytics are required.

@@ -5,8 +5,8 @@
   <meta name="troika-api" content="api.php">
   <meta name="theme-color" content="#101d1b"><meta name="description" content="Troika. A local card table for good company and bad hands. Play your Latvian house rules with friends or bots.">
   <title>Troika — Your table. Your rules.</title>
-  <link rel="icon" type="image/svg+xml" href="assets/mark.svg"><link rel="stylesheet" href="assets/style.css?v=8">
-  <script src="assets/app.js?v=8" defer></script>
+  <link rel="icon" type="image/svg+xml" href="assets/mark.svg"><link rel="stylesheet" href="assets/style.css?v=9">
+  <script src="assets/app.js?v=9" defer></script>
 </head>
 <body>
 <svg class="svg-defs" aria-hidden="true"><defs>
@@ -42,6 +42,7 @@
   </main>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="players-dialog" aria-labelledby="players-title"><div class="dialog-heading"><div><div class="eyebrow">HOST CONTROLS</div><h2 id="players-title">Manage players</h2></div><button class="icon-button close-players-dialog" aria-label="Close player management">×</button></div><div id="players-content"></div></dialog>
 <dialog id="scoreboard-dialog" aria-labelledby="scoreboard-title"><div class="dialog-heading"><div><div class="eyebrow">THE SESSION SO FAR</div><h2 id="scoreboard-title">Scoreboard</h2></div><button class="icon-button close-scoreboard-dialog" aria-label="Close scoreboard">×</button></div><div id="scoreboard-content"></div></dialog>
 <dialog id="replay-dialog" aria-labelledby="replay-title"><div class="dialog-heading"><div><div class="eyebrow">WHAT JUST HAPPENED</div><h2 id="replay-title">Last move replay</h2></div><button class="icon-button close-replay-dialog" aria-label="Close replay">×</button></div><div id="replay-content" class="replay-content"></div><button class="secondary" id="replay-again">↻ Replay again</button></dialog>
 <dialog id="matching-dialog" class="matching-dialog" aria-labelledby="matching-title" aria-describedby="matching-count"><div class="dialog-heading"><div><div class="eyebrow">MATCHING CARDS</div><h2 id="matching-title">You’ve got a match.</h2></div><button class="icon-button close-matching-dialog" aria-label="Close matching card warning">×</button></div><p id="matching-count" class="matching-count"></p><div id="matching-cards" class="matching-cards" aria-label="Matching cards available to play"></div><div class="matching-actions"><button id="quick-play-one" class="secondary" autofocus>Play only this card</button><button id="quick-play-group" class="primary">Play matching cards</button></div><button id="quick-play-cancel" class="text-button">Cancel · keep choosing</button></dialog>

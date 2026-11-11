@@ -9,7 +9,7 @@
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
-  let pendingQuickPlay = null, pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
+  let pendingQuickPlay = null, pendingKick = null, managePlayersMarkup = '', pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
   let draftName = store.get('nickname') || '', draftRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
@@ -67,7 +67,8 @@
   function clearCredentials() {
     dismissMatching();
     pileHistoryOpen=false;pileHistoryHovered=false;replaySnapshot=null;
-    ['scoreboard-dialog','replay-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
+    pendingKick=null;
+    ['scoreboard-dialog','replay-dialog','players-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
     if(credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
     const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);
@@ -88,7 +89,7 @@
     else if(newEvents.length) tone('play');
     lastEvent=newest;
     if(previousVersion !== game.version || oldStatus !== game.status){renderGame();previousVersion=game.version;}
-    else {renderSeats();renderPlayers();if(wasOffline)renderCenter();}
+    else {renderSeats();renderPlayers();if($('#players-dialog').open)renderManagePlayers();if(wasOffline)renderCenter();}
   }
   async function act(action,data={}) {
     if(busy) return;
@@ -183,6 +184,7 @@
     $('#room-panel').innerHTML=`<div class="room-tag"><small>YOUR PRIVATE TABLE</small><div><span class="room-code">${esc(game.room)}</span><button class="icon-button" data-copy aria-label="Copy invitation link"><svg><use href="#i-copy"/></svg></button></div><button class="text-button" data-leave>Leave table ↗</button></div>`;
     renderPlayers();renderSeats();renderCenter();renderHand();renderControls();renderSessionTools();
     if($('#scoreboard-dialog').open)renderScoreboard();
+    if($('#players-dialog').open)renderManagePlayers();
     const feed=[...game.events].reverse().slice(0,14).map(eventHTML).join('');
     $('#activity').innerHTML=feed;
     $('#talk-feed').innerHTML=feed;
@@ -232,7 +234,14 @@
   }
   function renderSessionTools() {
     const el=$('#session-tools');el.hidden=false;
-    el.innerHTML=`<button class="secondary" id="scoreboard-button">Scoreboard</button><button class="secondary" id="replay-button" ${game.lastMove?'':'disabled'}>↻ Replay</button>${host()&&game.status==='playing'?`<button class="secondary" id="pause-button" aria-pressed="${Boolean(game.paused)}">${game.paused?'▶ Resume':'Ⅱ Pause'}</button>`:''}`;
+    el.innerHTML=`${host()?'<button class="secondary" id="players-button">Players</button>':''}<button class="secondary" id="scoreboard-button">Scoreboard</button><button class="secondary" id="replay-button" ${game.lastMove?'':'disabled'}>↻ Replay</button>${host()&&game.status==='playing'?`<button class="secondary" id="pause-button" aria-pressed="${Boolean(game.paused)}">${game.paused?'▶ Resume':'Ⅱ Pause'}</button>`:''}`;
+  }
+  function renderManagePlayers() {
+    if(!host()){$('#players-dialog').close();pendingKick=null;return;}
+    const target=game.players.find(p=>p.id===pendingKick&&!p.bot&&p.id!==game.youId);
+    if(!target)pendingKick=null;
+    const html=`<p class="muted">Remove a player at any time, including if they disconnect. During a round, a bot keeps their cards and plays on.</p>${game.players.map(p=>`<div class="manage-player"><span class="small-avatar">${esc(initial(p.name))}</span><div class="manage-player-info"><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>Seat ${p.seat+1} · ${p.bot?'Bot':p.id===game.youId?'Table host':p.connected?'Connected':'Disconnected'}</small></div>${!p.bot&&p.id!==game.youId?`<button type="button" class="secondary kick-player" data-kick-player="${esc(p.id)}" aria-label="Kick ${esc(p.name)}">Kick</button>`:''}</div>`).join('')}${target?`<section class="kick-confirm" aria-label="Confirm player removal"><p>Kick <strong>${esc(target.name)}</strong>? ${game.status==='lobby'?'Their seat will become available.':game.status==='playing'?'A bot will take over their cards.':'Their result stays; a bot will occupy their seat for the next deal.'} Their current seat access will end.</p><div class="kick-actions"><button type="button" class="danger-button" id="confirm-kick">Confirm kick</button><button type="button" class="secondary" id="cancel-kick">Cancel</button></div></section>`:''}`;
+    if(managePlayersMarkup!==html){$('#players-content').innerHTML=html;managePlayersMarkup=html;}
   }
   function publicFaces(cards) {
     return (Array.isArray(cards)?cards:[]).filter(c=>c&&Number.isInteger(c.rank)&&c.rank>=2&&c.rank<=14&&Object.hasOwn(suits,c.suit));
@@ -398,6 +407,16 @@
   });
   document.addEventListener('click',async e=>{
     const target=e.target.closest('button');if(!target)return;
+    if(target.id==='players-button'){if(host()){pendingKick=null;renderManagePlayers();$('#players-dialog').showModal();}return;}
+    if(target.classList.contains('close-players-dialog')){$('#players-dialog').close();pendingKick=null;return;}
+    if(target.dataset.kickPlayer){if(host()){pendingKick=target.dataset.kickPlayer;renderManagePlayers();$('#confirm-kick')?.focus();}return;}
+    if(target.id==='cancel-kick'){pendingKick=null;renderManagePlayers();return;}
+    if(target.id==='confirm-kick'){
+      if(!host()||!pendingKick||busy)return;
+      const result=await act('kick',{playerId:pendingKick});
+      if(result?.state){pendingKick=null;renderManagePlayers();toast('Player removed. '+(game.status==='lobby'?'Their seat is free.':'A bot has their seat.'));}
+      return;
+    }
     if(target.id==='scoreboard-button'){renderScoreboard();$('#scoreboard-dialog').showModal();return;}
     if(target.id==='replay-button'){if(game?.lastMove){replaySnapshot=JSON.parse(JSON.stringify(game.lastMove));renderReplay();$('#replay-dialog').showModal();}return;}
     if(target.id==='replay-again'){renderReplay();return;}

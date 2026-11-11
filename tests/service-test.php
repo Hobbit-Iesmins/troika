@@ -160,6 +160,46 @@ try {
     $default=['mode'=>'standard','maxPlayers'=>5,'decks'=>1];
     check(request($db,'state',$legacyCredentials)['state']['settings']===$default && request($db,'lobby',['room'=>$legacy['room']])['lobby']['settings']===$default, 'legacy table settings default in private and public views');
     rejects(fn()=>request($db,'bot',$legacyCredentials,['seat'=>5]),'legacy tables retain original five-seat limit');
+    $kickHost=request($db,'create',[],['nickname'=>'Kick host','seat'=>4]);$kh=['room'=>$kickHost['room'],'token'=>$kickHost['token']];
+    $kickGuest=request($db,'join',['room'=>$kh['room']],['nickname'=>'Kick guest','seat'=>1]);$kg=['room'=>$kh['room'],'token'=>$kickGuest['token']];$target=$kickGuest['state']['youId'];
+    $withBot=request($db,'bot',$kh,['seat'=>2])['state'];$botId=$withBot['players'][2]['id'];$before=loadGame($db,$kh['room']);
+    rejects(fn()=>request($db,'kick',$kg,['playerId'=>$kickHost['state']['youId']]),'guest cannot kick the host');
+    foreach([null,1,[], '',$target.'x',str_repeat('f',24),$kickHost['state']['youId'],$botId] as $playerId) {
+        rejects(fn()=>request($db,'kick',$kh,['playerId'=>$playerId]),'invalid self bot or missing kick target rejected');
+        check(loadGame($db,$kh['room'])===$before,'rejected kick rolls back heartbeat and state');
+    }
+    $kicked=request($db,'kick',$kh,['playerId'=>$target])['state'];
+    check(count($kicked['players'])===2 && !in_array($target,array_column($kicked['players'],'id'),true),'lobby kick frees target seat');
+    check($kicked['hostId']===$kickHost['state']['youId'] && end($kicked['events'])['text']==='Kick host kicked Kick guest from the table.','kick event identifies host and removed player');
+    rejects(fn()=>request($db,'state',$kg),'lobby kicked key cannot reconnect');
+    $replacement=request($db,'join',['room'=>$kh['room']],['nickname'=>'Replacement','seat'=>1]);$before=loadGame($db,$kh['room']);
+    rejects(fn()=>request($db,'kick',$kh,['playerId'=>$target]),'stale ID cannot kick replacement occupying old seat');
+    check(loadGame($db,$kh['room'])===$before,'stale kick leaves replacement untouched');
+    foreach([false,true] as $paused) foreach([false,true] as $offline) {
+        $h=request($db,'create',[],['nickname'=>'Round host']);$ha=['room'=>$h['room'],'token'=>$h['token']];
+        $j=request($db,'join',['room'=>$h['room']],['nickname'=>'Round guest','seat'=>1]);$ja=['room'=>$h['room'],'token'=>$j['token']];
+        request($db,'ready',$ja,['ready'=>true]);request($db,'start',$ha);$g=loadGame($db,$h['room']);
+        $g['paused']=$paused;$g['turnId']=$j['state']['youId'];$g['botAt']=0;$g['players'][1]['lastSeen']=$offline?0:tk_now();
+        $playerBefore=$g['players'][1];$beforeCards=[$g['deck'],$g['pile'],$g['hole'],array_map(fn($p)=>[$p['hand'],$p['up'],$p['down']],$g['players'])];tk_save($db,$g);$beforeTime=tk_now();
+        $view=request($db,'kick',$ha,['playerId'=>$j['state']['youId']])['state'];$after=loadGame($db,$h['room']);
+        $expected=$playerBefore;$expected['bot']=true;$expected['tokenHash']='';$expected['ready']=true;
+        check($after['players'][1]===$expected,'kick converts online or offline human into bot without changing cards and stats');
+        check([$after['deck'],$after['pile'],$after['hole'],array_map(fn($p)=>[$p['hand'],$p['up'],$p['down']],$after['players'])]===$beforeCards,'kick conserves every card and its zone');
+        check($after['turnId']===$j['state']['youId'] && $after['paused']===$paused && $after['botAt']>=$beforeTime+0.85,'kick preserves turn and pause and defers bot action');
+        check($view['players'][1]['hand']===null,'kick response does not reveal target hand');
+        rejects(fn()=>request($db,'state',$ja),'round kicked key is revoked immediately');
+        $before=loadGame($db,$h['room']);rejects(fn()=>request($db,'kick',$ha,['playerId'=>$j['state']['youId']]),'second kick cannot target existing bot');
+        check(loadGame($db,$h['room'])===$before,'duplicate kick leaves state intact');
+        if($paused){$after['botAt']=0;tk_save($db,$after);request($db,'state',$ha);$frozen=loadGame($db,$h['room']);check($frozen['players'][1]===$expected && $frozen['turnId']===$j['state']['youId'],'paused kicked player remains frozen on later polls');}
+    }
+    $h=request($db,'create',[],['nickname'=>'Finished host']);$ha=['room'=>$h['room'],'token'=>$h['token']];
+    $j=request($db,'join',['room'=>$h['room']],['nickname'=>'Finished guest','seat'=>1]);$ja=['room'=>$h['room'],'token'=>$j['token']];
+    request($db,'ready',$ja,['ready'=>true]);request($db,'start',$ha);$g=loadGame($db,$h['room']);$g['status']='finished';$g['turnId']=null;$g['results']=array_column($g['players'],'id');
+    foreach($g['players'] as $i=>&$p)$p['finish']=$i+1;unset($p);tk_record_scores($g);tk_save($db,$g);$scores=$g['scoreboard'];$scores[$j['state']['youId']]['bot']=true;
+    $view=request($db,'kick',$ha,['playerId'=>$j['state']['youId']])['state'];$after=loadGame($db,$h['room']);
+    check($after['results']===$g['results'] && $after['scoreboard']===$scores && $after['players'][1]['bot'],'finished kick retains standings scores and player identity');
+    rejects(fn()=>request($db,'state',$ja),'finished kicked player cannot reconnect');
+    check(request($db,'rematch',$ha)['state']['players'][1]['bot'],'kicked seat remains bot for rematch');
     echo 'PASS: ' . $checks . ' service assertions (standard/expanded settings, seats, authorization, privacy, rollback, reconnect takeover, rematch).' . PHP_EOL;
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL . $e->getTraceAsString() . PHP_EOL);

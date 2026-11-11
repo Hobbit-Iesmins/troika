@@ -182,6 +182,22 @@ async function tk_dispatch(pool, request) {
         E.tk_require(typeof request.source === 'string', 'Choose a card source.');
         E.tk_play(game, id, request.source, request.cards); break;
       case 'pickup': E.tk_pickup(game, id); break;
+      case 'kick': {
+        tk_host(game, id);
+        E.tk_require(typeof request.playerId === 'string' && /^[a-f0-9]{24}$/.test(request.playerId), 'Choose a player to kick.');
+        const found = game.players.findIndex(player => player.id === request.playerId);
+        E.tk_require(found >= 0, 'That player has already left the table.');
+        const player = game.players[found], name = player.name, hostName = game.players[index].name;
+        E.tk_require(player.id !== id, 'You cannot kick yourself. Use Leave table instead.');
+        E.tk_require(!player.bot, 'That seat is already controlled by a bot.');
+        if (game.status === 'lobby') game.players.splice(found, 1);
+        else {
+          player.bot = true; player.tokenHash = ''; player.ready = true;
+          if (game.status === 'playing') game.botAt = E.tk_now() + 0.85;
+        }
+        E.tk_touch(game, hostName + ' kicked ' + name + (game.status === 'lobby' ? ' from the table.' : '; a bot takes over.'), 'lobby', player.id);
+        break;
+      }
       case 'replace_bot': {
         tk_host(game, id); E.tk_require(game.status === 'playing', 'Bot takeover is available during a round.');
         const seat = tk_seat(request.seat, capacity), player = game.players.find(player => player.seat === seat);

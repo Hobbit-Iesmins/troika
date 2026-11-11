@@ -62,7 +62,7 @@ test('pile history is visible on hover, survives polling, and supports focus, to
  }finally{page.close();}
 });
 test('cloud browser controls use the real Node handler and PostgreSQL for multiplayer, jumps, pause, replay and scores',{skip:!connectionString},async()=>{
- const schema='troika_ui_'+randomBytes(8).toString('hex'),admin=new Pool({connectionString,max:1});let pool,host,guest;
+ const schema='troika_ui_'+randomBytes(8).toString('hex'),admin=new Pool({connectionString,max:1});let pool,host,guest,lobbyGuest;
  try{
   await admin.query('CREATE SCHEMA '+schema);pool=new Pool({connectionString,max:4,options:'-c search_path='+schema});const handler=createHandler({pool});
   host=browser(handler);assert.ok(host.$('#connection').textContent.includes('ONLINE PLAY'));host.input('#nickname','Cloud Host');await host.click('#mode-expanded');await host.choose('#seat-count',9);await host.choose('#deck-count',2);host.$('#jump-in').checked=true;host.$('#jump-in').dispatchEvent(new host.w.Event('change',{bubbles:true}));await host.click('[data-choose-seat="8"]');await host.submit();
@@ -86,5 +86,17 @@ test('cloud browser controls use the real Node handler and PostgreSQL for multip
   await guest.click('#replay-button');assert.equal(guest.$$('#replay-content .replay-cards .card').length,0);assert.ok(!guest.$('#replay-content').textContent.includes('5'));await guest.click('.close-replay-dialog');
   assert.equal((await load()).recentCards.length,0,'failed blind attempt is not a public played card');
   g=await load();g.deck=[];g.pile=[];g.hole=[];g.openingRank=null;g.results=[];g.turnId=hp.id;for(const p of g.players){p.hand=[card(2,'S')];p.up=[];p.down=[];p.finish=null;}await save(g);await host.poll();await host.click('#hand-panel [data-card]');await host.click('#play-button');assert.equal((await load()).status,'finished');await host.click('#scoreboard-button');const row=host.$$('#scoreboard-content tbody tr').find(tr=>tr.textContent.includes('Cloud Host'));assert.equal(row.children[1].textContent,'1');assert.equal(row.children[2].textContent,'1');await host.click('.close-scoreboard-dialog');await host.click('#rematch-button');assert.equal((await load()).settings.maxPlayers,9);assert.equal(host.w.document.body.dataset.gameStatus,'lobby');assert.equal(host.errors.length,0);assert.equal(guest.errors.length,0);
- }finally{host?.close();guest?.close();if(pool)await pool.end();await admin.query('DROP SCHEMA IF EXISTS '+schema+' CASCADE');await admin.end();}
+  // Kick is host-only and includes an explicit cancellation path before changing a seat.
+  await guest.poll();assert.equal(guest.$('#players-button'),null);
+  lobbyGuest=browser(handler,'https://troika.example.test/?room='+room);await lobbyGuest.settle();lobbyGuest.input('#nickname','Lobby departure');await lobbyGuest.click('[data-choose-seat="0"]');await lobbyGuest.submit();await host.poll();
+  const lobbyId=lobbyGuest.responses.at(-1).state.youId;
+  await host.click('#players-button');assert.ok(host.$('#players-dialog').open);assert.equal(host.$(`[data-kick-player="${hp.id}"]`),null);
+  const kicksBefore=host.calls.filter(c=>c.action==='kick').length;await host.click(`[data-kick-player="${lobbyId}"]`);await host.click('#cancel-kick');assert.equal(host.calls.filter(c=>c.action==='kick').length,kicksBefore);
+  await host.click(`[data-kick-player="${lobbyId}"]`);await host.click('#confirm-kick');assert.ok(!(await load()).players.some(p=>p.id===lobbyId));await lobbyGuest.poll();assert.equal(lobbyGuest.w.document.body.dataset.gameStatus,'home');await host.click('.close-players-dialog');
+  await guest.click('#ready-button');await host.poll();await host.click('#start-button');await host.click('#pause-button');
+  const beforeKick=await load(),departing=beforeKick.players.find(p=>p.id===gp.id);
+  await host.click('#players-button');await host.click(`[data-kick-player="${gp.id}"]`);await host.click('#confirm-kick');
+  const afterKick=await load(),replacement=afterKick.players.find(p=>p.id===gp.id);assert.equal(replacement.bot,true);assert.equal(replacement.tokenHash,'');assert.deepEqual(replacement.hand,departing.hand);assert.deepEqual(replacement.up,departing.up);assert.deepEqual(replacement.down,departing.down);assert.equal(afterKick.turnId,beforeKick.turnId);assert.equal(afterKick.paused,true);
+  await guest.poll();assert.equal(guest.w.document.body.dataset.gameStatus,'home');assert.equal(guest.w.localStorage.getItem('troika.seat.'+room),null);assert.ok(host.$('#players-content').textContent.includes('Bot'));assert.equal(host.$(`[data-kick-player="${gp.id}"]`),null);assert.equal(host.errors.length,0);assert.equal(guest.errors.length,0);assert.equal(lobbyGuest.errors.length,0);
+ }finally{host?.close();guest?.close();lobbyGuest?.close();if(pool)await pool.end();await admin.query('DROP SCHEMA IF EXISTS '+schema+' CASCADE');await admin.end();}
 });
