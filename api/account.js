@@ -11,7 +11,12 @@ function createHandler(options={}){
   if(!/^application\/json(?:\s*;|\s*$)/i.test(req.headers['content-type']||''))return respond(415,{error:'Send this request as JSON.'});
   try{
    checkOrigin(req);
-   const body=await readBody(req),pool=await getPool();if(!options.dispatch)await initAccounts(pool);
+   const body=await readBody(req),pool=await getPool();
+   if(!options.dispatch){
+    const service=require('../cloud/service.js'),accounts=require('../cloud/accounts.js');await service.initDatabase(pool);
+    const probe=await pool.connect();let actor;try{actor=await accounts.authenticate(probe,req.headers.cookie);}finally{probe.release();}
+    if(actor){await service.refreshAccountConduct(pool,actor.id);if(body.action==='admin_forgive'&&actor.role==='admin'&&typeof body.userId==='string')await service.refreshAccountConduct(pool,body.userId);}
+   }
    const result=await dispatch(pool,body,{cookie:req.headers.cookie,ip:req.headers['x-real-ip']||req.socket?.remoteAddress||'unknown',secure:Boolean(process.env.VERCEL||req.headers['x-forwarded-proto']==='https'||req.socket?.encrypted),...(options.bootstrap?{bootstrap:options.bootstrap}:{})});
    if(result.cookie)res.setHeader('Set-Cookie',result.cookie);respond(200,result.body);
   }catch(error){if(error instanceof GameError)respond(error.status||400,{error:error.message});else if(error instanceof StorageError){console.error('Troika: account storage unavailable.',error.code);respond(503,{error:error.message,code:error.code});}else{console.error('Troika: account request failed.');respond(500,{error:'The account action could not be completed. Please try again.'});}}

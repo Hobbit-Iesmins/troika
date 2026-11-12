@@ -37,3 +37,14 @@
 
 @media(max-width:600px){.topbar .breadcrumb,.topbar .connection,.topbar .rules-button{display:none}.topbar .top-actions{width:100%;flex-wrap:nowrap;gap:5px}#account-button{max-width:90px}#ladder-button{max-width:72px}.topbar{height:43px}}
 .control-card .ranked-result{padding:10px;border:1px solid var(--gold);border-radius:5px;color:var(--gold);font-weight:bold;line-height:1.6}
+
+/* Conduct details are private profile/admin information, never part of the public ladder. */
+.account-conduct{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:6px;background:var(--panel2)}
+.account-conduct h3{margin:0 0 7px;font-size:11px;font-weight:normal;color:var(--muted)}
+.account-conduct-state{display:block;font-size:12px;color:var(--accent);line-height:1.5;overflow-wrap:anywhere}
+.account-conduct-limited{border-color:var(--red)}
+.account-conduct-limited .account-conduct-state{color:var(--red)}
+.account-conduct p{margin:7px 0;font-size:10px;line-height:1.65;color:var(--muted)}
+.account-conduct small{font-size:10px;line-height:1.5;color:var(--text)}
+.account-admin-detail form[data-account-form="admin_forgive"]{margin-top:20px;padding-top:2px;border-top:1px solid var(--line)}
+.account-admin-detail form[data-account-form="admin_forgive"]>.secondary{min-height:36px;border-color:var(--gold);color:var(--gold)}

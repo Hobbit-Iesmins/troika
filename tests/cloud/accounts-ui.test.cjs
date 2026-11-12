@@ -10,7 +10,7 @@ function page(handler,{url='https://troika.example.test/',local=false}={}){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.fetch=async(endpoint,options)=>{const body=JSON.parse(options.body);calls.push({endpoint,...body});const result=await handler(body,endpoint);return {ok:!result.error,json:async()=>result};};
  w.document.addEventListener('troika-account-change',e=>events.push(e.detail.user));w.document.addEventListener('troika-toast',e=>notices.push(e.detail.message));w.eval(source);
- return {w,calls,errors,events,notices,$:s=>w.document.querySelector(s),$$:s=>[...w.document.querySelectorAll(s)],async click(s){const el=w.document.querySelector(s);assert.ok(el,s);el.click();await settle();},input(name,value){w.document.querySelector(`[name="${name}"]`).value=value;},async submit(){w.document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await settle();},close(){w.close();}};
+ return {w,calls,errors,events,notices,$:s=>w.document.querySelector(s),$$:s=>[...w.document.querySelectorAll(s)],async click(s){const el=w.document.querySelector(s);assert.ok(el,s);el.click();await settle();},input(name,value){w.document.querySelector(`[name="${name}"]`).value=value;},async submit(selector='form'){w.document.querySelector(selector).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await settle();},close(){w.close();}};
 }
 test('local MAMP account controls stay hidden and make no cloud requests',async()=>{
  const p=page(()=>{throw Error('unexpected request');},{local:true});try{await settle();assert.equal(p.calls.length,0);assert.equal(p.$('#account-button').hidden,true);assert.equal(p.$('#ladder-button').hidden,true);assert.equal(p.w.TroikaAccounts.user(),null);}finally{p.close();}
@@ -66,4 +66,37 @@ test('rankings and match history escape names; admin reset links stay private an
 test('reset links remove tokens from the address and submit only to the reset endpoint',async()=>{
  const p=page(async body=>{if(body.action==='me')return {user:null};if(body.action==='reset'){assert.equal(body.resetToken,'one-time-reset');return {user:account()};}throw Error(body.action);},{url:'https://troika.example.test/#reset=one-time-reset'});
  try{await settle();assert.equal(p.w.location.hash,'');assert.ok(p.$('#account-title').textContent.includes('Reset'));p.input('password','long-new-password');await p.submit();assert.equal(p.w.TroikaAccounts.user().id,'user1');assert.equal(p.w.localStorage.length,0);assert.equal(p.errors.length,0);}finally{p.close();}
+});
+
+
+test('ranked conduct stays private in profile and leaves casual access available',async()=>{
+ const limited=account({rankedStatus:{strikes:3,cooldownUntil:'2099-01-10T12:00:00Z',rankedAllowed:false,nextPenalty:'7 days'}});
+ const p=page(async body=>{if(body.action==='me')return {user:limited};if(body.action==='leaderboard')return {players:[{nickname:'Ada',elo:500,rankedStatus:limited.rankedStatus}]};throw Error(body.action);});
+ try{
+  await settle();await p.click('#account-button');
+  assert.ok(p.$('.account-conduct-limited'));assert.ok(p.$('.account-conduct-state').textContent.startsWith('Ranked cooldown until '));assert.ok(p.$('.account-conduct').textContent.includes('3 abandonments in the last 7 days'));assert.ok(p.$('.account-conduct').textContent.includes('Next: 7 days'));assert.ok(p.$('.account-conduct').textContent.includes('5 minutes to reconnect'));assert.ok(p.$('.account-conduct').textContent.includes('Casual games remain available'));
+  await p.click('#ladder-button');assert.equal(p.$('.account-conduct'),null);assert.ok(!p.$('#account-content').textContent.includes('cooldown'));
+  assert.equal(p.errors.length,0);
+ }finally{p.close();}
+ const legacy=page(async body=>{if(body.action==='me')return {user:account()};throw Error(body.action);});
+ try{await settle();await legacy.click('#account-button');assert.equal(legacy.$('.account-conduct-state').textContent,'Ranked play available');assert.ok(legacy.$('.account-conduct').textContent.includes('0 abandonments'));}finally{legacy.close();}
+});
+
+test('administrator clears a selected player ranked penalties with a reason and refreshes private status',async()=>{
+ const current=account({role:'admin'});let target=account({id:'user2',nickname:'Boris',rankedStatus:{strikes:2,cooldownUntil:'2099-01-10T12:00:00Z',rankedAllowed:false,nextPenalty:'60 minutes'}});
+ const p=page(async(body,endpoint)=>{
+  if(body.action==='me')return {user:current};
+  if(body.action==='admin_users')return {users:[current,target]};
+  if(body.action==='admin_forgive'){
+   assert.equal(endpoint,'/api/account');assert.equal(body.userId,'user2');assert.equal(body.reason,'Connection outage verified by teacher');
+   target={...target,rankedStatus:{strikes:0,cooldownUntil:null,rankedAllowed:true,nextPenalty:'warning'}};return {success:true};
+  }
+  throw Error(body.action);
+ });
+ try{
+  await settle();await p.click('#account-button');await p.click('[data-account-view="admin"]');await p.click('[data-manage-account="user2"]');assert.ok(p.$('.account-admin-detail .account-conduct-state').textContent.startsWith('Ranked cooldown until '));
+  const form=p.$('form[data-account-form="admin_forgive"]'),reason=form.querySelector('[name="reason"]');assert.equal(reason.minLength,5);assert.equal(reason.maxLength,500);reason.value='Connection outage verified by teacher';
+  await p.submit('form[data-account-form="admin_forgive"]');
+  assert.equal(p.calls.filter(c=>c.action==='admin_forgive').length,1);assert.equal(p.$('.account-admin-detail .account-conduct-state').textContent,'Ranked play available');assert.ok(p.$('.account-admin-detail .account-conduct').textContent.includes('0 abandonments'));assert.ok(p.$('#account-message').textContent.includes('audit history is kept'));assert.equal(p.$('#account-dialog').open,true);assert.equal(p.notices.length,0);assert.equal(p.errors.length,0);
+ }finally{p.close();}
 });

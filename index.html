@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#101d1b"><meta name="description" content="Troika. A local card table for good company and bad hands. Play your Latvian house rules with friends or bots.">
   <title>Troika — Your table. Your rules.</title>
   <link rel="icon" type="image/svg+xml" href="assets/mark.svg"><link rel="stylesheet" href="assets/style.css?v=13">
-  <link rel="stylesheet" href="assets/accounts.css?v=13">
-  <script src="assets/accounts.js?v=14" defer></script>
-  <script src="assets/app.js?v=14" defer></script>
+  <link rel="stylesheet" href="assets/accounts.css?v=15">
+  <script src="assets/accounts.js?v=15" defer></script>
+  <script src="assets/app.js?v=15" defer></script>
 </head>
 <body>
 <svg class="svg-defs" aria-hidden="true"><defs>
@@ -45,6 +45,7 @@
 </div>
 <dialog id="account-dialog" aria-labelledby="account-title"><div id="account-content"></div></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="leave-dialog" aria-labelledby="leave-ranked-title"><div class="dialog-heading"><h2 id="leave-ranked-title">Leave ranked table?</h2></div><p class="account-intro">Leaving before you finish your cards counts as an abandonment immediately. Your bot will finish and the Elo result still applies.</p><p class="account-help">Repeated departures within seven days: warning, then 30 minutes, 60 minutes, and seven days away from ranked play. Casual games stay available. A lost connection gives you five minutes to reconnect.</p><div class="kick-actions"><button id="cancel-ranked-leave" class="secondary" type="button">Stay at the table</button><button id="confirm-ranked-leave" class="danger-button" type="button">Leave ranked table</button></div></dialog>
 <dialog id="players-dialog" aria-labelledby="players-title"><div class="dialog-heading"><div><div class="eyebrow">HOST CONTROLS</div><h2 id="players-title">Manage players</h2></div><button class="icon-button close-players-dialog" aria-label="Close player management">×</button></div><div id="players-content"></div></dialog>
 <dialog id="scoreboard-dialog" aria-labelledby="scoreboard-title"><div class="dialog-heading"><div><div class="eyebrow">THE SESSION SO FAR</div><h2 id="scoreboard-title">Scoreboard</h2></div><button class="icon-button close-scoreboard-dialog" aria-label="Close scoreboard">×</button></div><div id="scoreboard-content"></div></dialog>
 <dialog id="replay-dialog" aria-labelledby="replay-title"><div class="dialog-heading"><div><div class="eyebrow">WHAT JUST HAPPENED</div><h2 id="replay-title">Last move replay</h2></div><button class="icon-button close-replay-dialog" aria-label="Close replay">×</button></div><div id="replay-content" class="replay-content"></div><button class="secondary" id="replay-again">↻ Replay again</button></dialog>

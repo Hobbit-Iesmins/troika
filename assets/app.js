@@ -58,6 +58,7 @@
         if(game?.ranked&&response.status===401){hideRankedSeat();window.TroikaAccounts?.refresh().catch(()=>{});}
         throw new Error(result.error || 'The table could not complete that action.');
       }
+      if(result.abandoned){clearCredentials();renderHome();toast(conductMessage(result.rankedStatus,'Your five-minute reconnect window expired.'),true);window.TroikaAccounts?.refresh().catch(()=>{});}
       return result;
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('The host took too long to respond. Keep this page open to reconnect.');
@@ -74,7 +75,7 @@
     dismissMatching();
     pileHistoryOpen=false;pileHistoryHovered=false;replaySnapshot=null;
     pendingKick=null;ownBlindRevealed=false;
-    ['scoreboard-dialog','replay-dialog','players-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
+    ['scoreboard-dialog','replay-dialog','players-dialog','leave-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
     if(forget&&credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
     const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);
@@ -160,7 +161,7 @@
     if(CLOUD){
       const user=accountUser();
       if(user){$('#nickname').value=user.nickname;$('#nickname').readOnly=true;draftName=user.nickname;}
-      if(!joinMode)$('#entry-seat-picker').previousElementSibling.insertAdjacentHTML('beforebegin',`<label class="option-toggle" for="ranked-play"><input type="checkbox" id="ranked-play" ${draftRanked?'checked':''} ${user?'':'disabled'}><span><strong>Ranked game</strong><small>${user?'Human accounts only · finishing place changes Elo.':'Sign in to enable rankings. Casual play needs no account.'}</small></span></label>`);
+      if(!joinMode)$('#entry-seat-picker').previousElementSibling.insertAdjacentHTML('beforebegin',`<label class="option-toggle" for="ranked-play"><input type="checkbox" id="ranked-play" ${draftRanked?'checked':''} ${user&&user.rankedStatus?.rankedAllowed!==false?'':'disabled'}><span><strong>Ranked game</strong><small>${user?.rankedStatus?.rankedAllowed===false?'Ranked cooldown until '+esc(new Date(user.rankedStatus.cooldownUntil).toLocaleString())+'. Casual play is available.':user?'Human accounts only · finishing place changes Elo.':'Sign in to enable rankings. Casual play needs no account.'}</small></span></label>`);
     }
   }
   function seatAttributes(seat) {
@@ -184,7 +185,7 @@
         if(p.up.length) reserves=p.up.map(c=>`<span class="reserve-stack">${p.downCount?backHTML():''}${cardHTML(c,{small:true,button:self&&p.phase==='up'&&(myTurn()||canJump(c.id,'up')),source:'up',selectedCard:selected.includes(c.id)})}</span>`).join('');
         else reserves=(p.downSlots || []).map(id=>backHTML(id,self&&p.phase==='down'&&myTurn(),selected.includes(id))).join('');
       }
-      return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
+      return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30&&!game.ranked?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
     }).join('');
     // Keep the active ring running through heartbeat polls and unrelated updates.
     if(seatsMarkup!==markup){$('#seats').innerHTML=markup;seatsMarkup=markup;}
@@ -260,9 +261,10 @@
   }
   function renderManagePlayers() {
     if(!host()){$('#players-dialog').close();pendingKick=null;return;}
-    const target=game.players.find(p=>p.id===pendingKick&&!p.bot&&p.id!==game.youId);
+    const canKick=!(game.ranked&&game.status==='playing')||accountUser()?.role==='admin';
+    const target=canKick?game.players.find(p=>p.id===pendingKick&&!p.bot&&p.id!==game.youId):null;
     if(!target)pendingKick=null;
-    const html=`<p class="muted">Remove a player at any time, including if they disconnect. During a round, a bot keeps their cards and plays on.</p>${game.players.map(p=>`<div class="manage-player"><span class="small-avatar">${esc(initial(p.name))}</span><div class="manage-player-info"><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>Seat ${p.seat+1} · ${p.bot?'Bot':p.id===game.youId?'Table host':p.connected?'Connected':'Disconnected'}</small></div>${!p.bot&&p.id!==game.youId?`<button type="button" class="secondary kick-player" data-kick-player="${esc(p.id)}" aria-label="Kick ${esc(p.name)}">Kick</button>`:''}</div>`).join('')}${target?`<section class="kick-confirm" aria-label="Confirm player removal"><p>Kick <strong>${esc(target.name)}</strong>? ${game.status==='lobby'?'Their seat will become available.':game.status==='playing'?'A bot will take over their cards.':'Their result stays; a bot will occupy their seat for the next deal.'} Their current seat access will end.</p><div class="kick-actions"><button type="button" class="danger-button" id="confirm-kick">Confirm kick</button><button type="button" class="secondary" id="cancel-kick">Cancel</button></div></section>`:''}`;
+    const html=`<p class="muted">${game.ranked&&game.status==='playing'?'Ranked players have five minutes to reconnect. Only an admin can remove them early; their bot keeps the ranked result.':'Remove a player at any time. During a round, a bot keeps their cards and plays on.'}</p>${game.players.map(p=>`<div class="manage-player"><span class="small-avatar">${esc(initial(p.name))}</span><div class="manage-player-info"><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>Seat ${p.seat+1} · ${p.bot?'Bot':p.id===game.youId?'Table host':p.connected?'Connected':'Disconnected'}</small></div>${canKick&&!p.bot&&p.id!==game.youId?`<button type="button" class="secondary kick-player" data-kick-player="${esc(p.id)}" aria-label="Kick ${esc(p.name)}">Kick</button>`:''}</div>`).join('')}${target?`<section class="kick-confirm" aria-label="Confirm player removal"><p>Kick <strong>${esc(target.name)}</strong>? ${game.status==='lobby'?'Their seat will become available.':game.status==='playing'?'A bot will take over their cards.':'Their result stays; a bot will occupy their seat for the next deal.'} Their current seat access will end.</p><div class="kick-actions"><button type="button" class="danger-button" id="confirm-kick">Confirm kick</button><button type="button" class="secondary" id="cancel-kick">Cancel</button></div></section>`:''}`;
     if(managePlayersMarkup!==html){$('#players-content').innerHTML=html;managePlayersMarkup=html;}
   }
   function publicFaces(cards) {
@@ -314,12 +316,13 @@
     $('#table-badge').append(document.createTextNode(' · RANKED'));
     const card=$('#control-panel .control-card');if(!card)return;
     if($('#add-bot-button'))$('#add-bot-button').hidden=true;
+    if(game.status==='lobby'&&card.querySelector('.small-note'))card.querySelector('.small-note').textContent='Ranked play needs at least two signed-in humans. Remove any bot seats before a rematch.';
     const rating=game.ranking;
     if(game.status==='finished'){
       const own=rating?.results?.find(r=>r.playerId===game.youId);
       const message=rating?.status==='void'?'Ratings unchanged: the host kicked a player during this round.':own?`${own.change>0?'+':''}${own.change} Elo · ${own.after} · ${own.tier}`:'Recording the ranked result…';
       card.insertAdjacentHTML('beforeend',`<p class="ranked-result" role="status">${esc(message)}</p>`);
-    }else if(game.status==='playing')card.insertAdjacentHTML('beforeend','<p class="small-note muted">Ranked round · leaving keeps your final result. A host kick voids rating changes.</p>');
+    }else if(game.status==='playing')card.insertAdjacentHTML('beforeend','<p class="small-note muted">Ranked round · leaving counts immediately; reconnect within five minutes after a disconnect. Bot takeovers keep your Elo result.</p>');
   }
   function selectCard(id,source) {
     if(busy||source!==currentSource()||(!myTurn()&&!canJump(id,source)))return;
@@ -437,6 +440,14 @@
       if(!game){const el=$('#form-error');el.textContent=e.message;el.hidden=false;}else toast(e.message,true);
     } finally {busy=false;document.body.classList.remove('busy');}
   }
+  function conductMessage(status,prefix='You left the table.'){
+    if(!status)return prefix;
+    return prefix+' '+(status.rankedAllowed===false?'Ranked cooldown until '+new Date(status.cooldownUntil).toLocaleString()+'. Casual play is available.':status.strikes>0?'Ranked departure recorded. Next penalty: '+status.nextPenalty+'.':'No ranked penalty.');
+  }
+  async function leaveTable(){
+    const result=await act('leave');
+    if(result?.left&&!result.abandoned){$('#talk-dialog').close();clearCredentials();renderHome();toast(conductMessage(result.rankedStatus),Boolean(result.rankedStatus?.strikes));window.TroikaAccounts?.refresh().catch(()=>{});}
+  }
   async function copyInvite() {
     if(!game)return; const url=new URL(location.href);url.search='';url.searchParams.set('room',game.room);
     try {if(!navigator.clipboard)throw new Error();await navigator.clipboard.writeText(url.href);toast(localhost()?'Link copied. Replace localhost with your computer’s private IP before sharing.':(CLOUD?'Invite link copied. Friends can join from their own devices.':'Invite link copied. Friends need the same local network.'));}
@@ -460,12 +471,12 @@
     if(!saved?.token)return;
     const userId=accountUser().id;restoringSeat=true;
     try{credentials=saved;const result=await request('state');if(accountUser()?.id===userId)applyState(result.state);}
-    catch{credentials=null;setConnection(true,CLOUD?'ONLINE PLAY':'LOCAL PLAY');}
+    catch(e){if(/seat key|Table not found/.test(e.message)){store.remove('seat.'+room);if(store.get('lastRoom')===room)store.remove('lastRoom');}credentials=null;setConnection(true,CLOUD?'ONLINE PLAY':'LOCAL PLAY');}
     finally{restoringSeat=false;}
   }
   document.addEventListener('troika-toast',event=>{if(typeof event.detail?.message==='string')toast(event.detail.message);});
   document.addEventListener('troika-account-change',()=>{
-    const user=accountUser();if(!user)draftRanked=false;
+    const user=accountUser();if(!user||user.rankedStatus?.rankedAllowed===false)draftRanked=false;
     if(game?.ranked&&(!user||game.rankedAccountId!==user.id))hideRankedSeat();
     if(!game){renderEntry();renderSeats();if(user)restoreSavedSeat();}
   });
@@ -541,7 +552,11 @@
     if(target.id==='start-button'){await act('start');return;}
     if(target.id==='add-bot-button'){const seat=seats().find(i=>!game.players.some(p=>p.seat===i));if(seat!==undefined)await act('bot',{seat});return;}
     if(target.id==='rematch-button'){await act('rematch');return;}
-    if(target.hasAttribute('data-leave')){const result=await act('leave');if(result?.left){$('#talk-dialog').close();clearCredentials();renderHome();toast('You left the table.');}return;}
+    if(target.id==='cancel-ranked-leave'){$('#leave-dialog').close();return;}
+    if(target.id==='confirm-ranked-leave'){$('#leave-dialog').close();await leaveTable();return;}
+    if(target.hasAttribute('data-leave')){
+      if(game?.ranked&&game.status==='playing'&&!me()?.finish)$('#leave-dialog').showModal();else await leaveTable();return;
+    }
   });
   document.addEventListener('dblclick',e=>{
     const card=e.target.closest('#hand-panel button[data-card][data-source="hand"]');

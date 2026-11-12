@@ -3,6 +3,7 @@ const crypto=require('node:crypto');
 const {promisify}=require('node:util');
 const fs=require('node:fs');const path=require('node:path');
 const {GameError}=require('./engine.js');const {storageError}=require('./database.js');
+const C=require('./conduct.js');
 const derive=promisify(crypto.scrypt),initialized=new WeakMap();
 const COOKIE='troika_session',SESSION_DAYS=30;
 const SQL=`CREATE TABLE IF NOT EXISTS troika_accounts (
@@ -20,7 +21,8 @@ ALTER TABLE troika_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE troika_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE troika_password_resets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE troika_owner_claim ENABLE ROW LEVEL SECURITY;
-ALTER TABLE troika_account_limits ENABLE ROW LEVEL SECURITY;`;
+ALTER TABLE troika_account_limits ENABLE ROW LEVEL SECURITY;
+${C.SQL}`;
 const fail=(condition,message,status=400)=>{if(!condition)throw new GameError(message,status);};
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
 const normalize=value=>value.normalize('NFC').toLowerCase();
@@ -117,6 +119,8 @@ async function dispatchAccount(pool,request,context={}){
    }else if(action==='password'){
     const row=(await c.query('SELECT * FROM troika_accounts WHERE id=$1 FOR UPDATE',[user.id])).rows[0];fail(await verify(request.currentPassword,row.password_hash),'Your current password is incorrect.',403);
     const encoded=await passwordHash(request.password);await c.query('UPDATE troika_accounts SET password_hash=$2 WHERE id=$1',[user.id,encoded]);await c.query('DELETE FROM troika_sessions WHERE user_id=$1',[user.id]);await c.query('DELETE FROM troika_password_resets WHERE user_id=$1',[user.id]);cookieValue=await createSession(c,user.id,secure);body={user};
+   }else if(action==='admin_forgive'){
+    await C.forgive(c,user,request.userId,request.reason);body={success:true};
    }else if(action==='admin_users'){
     const rows=(await c.query('SELECT * FROM troika_accounts ORDER BY created DESC LIMIT 250')).rows;body={users:rows.map(privateUser)};
    }else if(action==='admin_reset'){
@@ -127,6 +131,8 @@ async function dispatchAccount(pool,request,context={}){
     await c.query('UPDATE troika_accounts SET suspended=$2 WHERE id=$1',[row.id,request.suspended]);if(request.suspended){await c.query('DELETE FROM troika_sessions WHERE user_id=$1',[row.id]);await c.query('DELETE FROM troika_password_resets WHERE user_id=$1',[row.id]);}body={success:true};
    }else throw new GameError('Unknown account action.');
   }
+  if(body.user)body.user.rankedStatus=await C.getStatus(c,body.user.id);
+  if(body.users){const statuses=await C.getStatuses(c,body.users.map(u=>u.id));for(const u of body.users)u.rankedStatus=statuses[u.id];}
   await c.query('COMMIT');transaction=false;return {body,...(cookieValue?{cookie:cookieValue}:{})};
  }catch(error){if(transaction)await c.query('ROLLBACK').catch(()=>{});if(error instanceof GameError)throw error;if(error.code==='23505')throw new GameError('That email address or nickname is already registered.',409);throw storageError(error);}finally{c.release();}
 }

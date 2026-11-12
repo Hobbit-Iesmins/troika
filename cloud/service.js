@@ -3,6 +3,7 @@ const { randomBytes, randomInt, createHash, timingSafeEqual } = require('node:cr
 const E = require('./engine.js');
 const A = require('./accounts.js');
 const R = require('./rankings.js');
+const C = require('./conduct.js');
 const { StorageError, storageError } = require('./database.js');
 const initialized = new WeakMap();
 const SQL_SCHEMA = `CREATE TABLE IF NOT EXISTS troika_rooms (
@@ -91,12 +92,39 @@ function view(game,id) {
   if(game.ranked){state.ranked=true;state.rankedAccountId=game.players.find(p=>p.id===id)?.accountId;state.ranking=game.ranking?{status:game.ranking.status,reason:game.ranking.reason,results:game.ranking.results}:null;}
   return state;
 }
+function initializeConduct(game){
+  if(!game.ranked||game.status!=='playing'||!game.ranking||Number.isFinite(game.ranking.conductSince))return false;
+  game.ranking.conductSince=E.tk_now();if(game.paused)game.ranking.pausedAt=E.tk_now();
+  E.tk_touch(game,'Ranked reconnect protection is active: disconnected players have five minutes to return.','lobby');return true;
+}
+// Serverless deadlines are checked on table activity and before the returning
+// account can enter another ranked table. Each old room commits independently.
+async function refreshAccountConduct(pool,accountId){
+  const found=await pool.query(`SELECT code FROM troika_rooms WHERE state->>'ranked'='true' AND state->>'status'='playing'
+    AND EXISTS(SELECT 1 FROM jsonb_array_elements(state->'players') p WHERE p->>'accountId'=$1) ORDER BY code`,[accountId]);
+  for(const {code} of found.rows){
+    const c=await pool.connect();let transaction=false;
+    try{
+      await c.query('BEGIN');transaction=true;await c.query("SET LOCAL lock_timeout='5000ms'");
+      const locked=await c.query('SELECT state FROM troika_rooms WHERE code=$1 FOR UPDATE',[code]);if(!locked.rows.length){await c.query('COMMIT');transaction=false;continue;}
+      const g=typeof locked.rows[0].state==='string'?JSON.parse(locked.rows[0].state):locked.rows[0].state;
+      const initializedConduct=initializeConduct(g),result=await C.processRoom(c,g,E.tk_now());let moves=0;
+      while(g.status==='playing'&&!g.paused&&g.players.filter(p=>p.finish===null).every(p=>p.bot)&&moves<256){if(!E.tk_bot_step(g))break;moves++;}
+      if(initializedConduct||result.changed||moves)await save(c,g);
+      await c.query('COMMIT');transaction=false;
+    }catch(error){if(transaction)await c.query('ROLLBACK').catch(()=>{});throw error;}finally{c.release();}
+  }
+}
 /** Each existing room is locked until its validated action is saved and committed. */
 async function tk_dispatch(pool, request, context = {}) {
   E.tk_require(request && typeof request === 'object' && !Array.isArray(request), 'Send a JSON object.');
   const action = request.action ?? '';
   E.tk_require(typeof action === 'string', 'Choose a valid action.');
   await initDatabase(pool);
+  if(['create','join','start'].includes(action)&&context.cookie){
+    const probe=await pool.connect();let actor;try{actor=await A.authenticate(probe,context.cookie);}finally{probe.release();}
+    if(actor)await refreshAccountConduct(pool,actor.id);
+  }
   let client;
   try { client = await pool.connect(); } catch (error) { throw storageError(error); }
   let transaction = false;
@@ -109,6 +137,7 @@ async function tk_dispatch(pool, request, context = {}) {
       E.tk_require(request.ranked===undefined||typeof request.ranked==='boolean','Choose casual or ranked play.');
       const ranked=request.ranked===true;
       E.tk_require(!ranked||account,'Sign in before creating a ranked table.',401);
+      if(ranked){await client.query('SELECT id FROM troika_accounts WHERE id=$1 FOR UPDATE',[account.id]);await C.assertEligible(client,account.id);}
       const settingsInput = {};
       for (const key of ['mode', 'maxPlayers', 'decks', 'burnRule', 'jumpIn']) if (Object.hasOwn(request, key)) settingsInput[key] = request[key];
       const settings = E.tk_settings(settingsInput);
@@ -141,6 +170,7 @@ async function tk_dispatch(pool, request, context = {}) {
     const capacity = game.settings.maxPlayers;
     if (action === 'join') {
       E.tk_require(!game.ranked||account,'Sign in before joining a ranked table.',401);
+      if(game.ranked){await client.query('SELECT id FROM troika_accounts WHERE id=$1 FOR UPDATE',[account.id]);await C.assertEligible(client,account.id);}
       E.tk_require(!game.ranked||!game.players.some(p=>p.accountId===account.id),'This account already has a seat at the table.');
       tk_lobby(game); E.tk_require(game.players.length < capacity, 'This table is full.');
       const name = tk_nickname(account?.nickname||request.nickname), seat = tk_seat(request.seat, capacity);
@@ -162,13 +192,23 @@ async function tk_dispatch(pool, request, context = {}) {
     }
     const id = tk_auth(game, request.token), index = E.tk_index(game, id);
     E.tk_require(!game.ranked||(account&&account.id===game.players[index].accountId),'Sign in to the account that owns this ranked seat.',401);
+    initializeConduct(game);await C.processRoom(client,game,E.tk_now());
+    if(game.players[index].bot){
+      const rankedStatus=await C.getStatus(client,account.id);await save(client,game);await query(client,'COMMIT');transaction=false;
+      return {left:true,abandoned:true,rankedStatus};
+    }
     game.players[index].lastSeen = E.tk_now();
+    if(game.ranked)game.players[index].rankedPauseCredit=0;
     switch (action) {
       case 'state': break;
       case 'pause':
         tk_host(game, id); E.tk_require(game.status === 'playing', 'Pause is available during a round.');
         E.tk_require(typeof request.paused === 'boolean', 'Choose pause or resume.');
         if (game.paused !== request.paused) {
+          if(game.ranked&&game.ranking){
+            if(request.paused)game.ranking.pausedAt=E.tk_now();
+            else{const pausedAt=game.ranking.pausedAt??E.tk_now();for(const p of game.players)if(!p.bot&&p.finish===null)p.rankedPauseCredit=(p.rankedPauseCredit||0)+Math.max(0,E.tk_now()-Math.max(p.lastSeen,pausedAt));delete game.ranking.pausedAt;}
+          }
           game.paused = request.paused; game.botAt = E.tk_now() + 0.85;
           E.tk_touch(game, game.players[index].name + (game.paused ? ' paused the round.' : ' resumed the round.'), 'pause', id);
         }
@@ -199,7 +239,11 @@ async function tk_dispatch(pool, request, context = {}) {
         E.tk_require(game.players[found].bot, 'Only bot seats can be removed.');
         const [removed] = game.players.splice(found, 1); E.tk_touch(game, removed.name + ' left the table.', 'lobby', removed.id); break;
       }
-      case 'start': tk_host(game, id); E.tk_start(game);if(game.ranked)await R.startRankedRound(client,game);break;
+      case 'start':
+        tk_host(game,id);
+        if(game.ranked)E.tk_require(game.players.every(p=>!p.bot&&typeof p.accountId==='string'),'Remove bot seats before starting a ranked round.');
+        if(game.ranked){await client.query('SELECT id FROM troika_accounts WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE',[game.players.map(p=>p.accountId).filter(Boolean)]);for(const p of game.players)await C.assertEligible(client,p.accountId);}
+        E.tk_start(game);if(game.ranked){await R.startRankedRound(client,game);game.ranking.conductSince=E.tk_now();for(const p of game.players){p.rankedPauseCredit=0;delete p.departureReason;}}break;
       case 'play':
         E.tk_require(Array.isArray(request.cards) && request.cards.every(card => typeof card === 'string'), 'Choose a card to play.');
         E.tk_require(typeof request.source === 'string', 'Choose a card source.');
@@ -213,7 +257,12 @@ async function tk_dispatch(pool, request, context = {}) {
         const player = game.players[found], name = player.name, hostName = game.players[index].name;
         E.tk_require(player.id !== id, 'You cannot kick yourself. Use Leave table instead.');
         E.tk_require(!player.bot, 'That seat is already controlled by a bot.');
-        if(game.status==='playing')R.voidRankedRound(game,'host_kick');
+        if(game.ranked&&game.status==='playing'){
+          E.tk_require(account?.role==='admin','Only an administrator can remove a player during a ranked round.',403);
+          await client.query('SELECT id FROM troika_accounts WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE',[game.players.map(p=>p.accountId).filter(Boolean)]);
+          await C.auditKick(client,account,player.accountId,game.room,game.ranking.id);
+        }
+        if(game.ranked)player.departureReason='kick';
         if (game.status === 'lobby') game.players.splice(found, 1);
         else {
           player.bot = true; player.tokenHash = ''; player.ready = true;
@@ -227,6 +276,7 @@ async function tk_dispatch(pool, request, context = {}) {
         const seat = tk_seat(request.seat, capacity), player = game.players.find(player => player.seat === seat);
         E.tk_require(player, 'Choose an occupied seat.');
         E.tk_require(!player.bot && player.id !== id, 'Choose a disconnected human player.');
+        E.tk_require(!game.ranked,'Ranked players have five minutes to reconnect; bot takeover is automatic after the grace period.');
         E.tk_require(E.tk_now() - player.lastSeen >= 30, 'Wait 30 seconds after the player disconnects before using a bot.');
         player.bot = true; player.tokenHash = ''; player.ready = true;
         E.tk_touch(game, 'A bot takes over for ' + player.name + '.', 'lobby', player.id); break;
@@ -239,6 +289,11 @@ async function tk_dispatch(pool, request, context = {}) {
         E.tk_touch(game, 'Rematch! Seats stay the same. Get ready for a new deal.', 'lobby', id); break;
       case 'leave': {
         const name = game.players[index].name;
+        if(game.ranked&&game.status==='playing'&&game.players[index].finish===null){
+          await C.recordAbandonment(client,{matchId:game.ranking.id,accountId:account.id,room:game.room,reason:'left',occurredAt:E.tk_now()});
+          game.players[index].departureReason='abandonment';
+        }
+        const rankedStatus=game.ranked?await C.getStatus(client,account.id):undefined;
         if (game.status === 'lobby') game.players.splice(index, 1);
         else { game.players[index].bot = true; game.players[index].tokenHash = ''; game.players[index].ready = true; }
         if (game.hostId === id) {
@@ -248,7 +303,7 @@ async function tk_dispatch(pool, request, context = {}) {
         }
         E.tk_touch(game, name + ' left' + (game.status === 'lobby' ? '.' : '; a bot takes over.'), 'lobby', id);
         await save(client, game); await query(client, 'COMMIT'); transaction = false;
-        return { left: true };
+        return { left: true,...(rankedStatus?{rankedStatus}:{}) };
       }
       default: throw new E.GameError('Unknown game action.');
     }
@@ -260,4 +315,4 @@ async function tk_dispatch(pool, request, context = {}) {
     throw error;
   } finally { client.release(); }
 }
-module.exports = { tk_dispatch, initDatabase, SQL_SCHEMA, tk_nickname, tk_seat, tk_same_name, tk_bot_name, tk_free_seat, tk_auth };
+module.exports = { tk_dispatch, initDatabase, refreshAccountConduct, SQL_SCHEMA, tk_nickname, tk_seat, tk_same_name, tk_bot_name, tk_free_seat, tk_auth };
