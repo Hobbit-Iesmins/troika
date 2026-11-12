@@ -1,0 +1,39 @@
+/* Account and ranking controls follow the selected table theme. */
+#account-button,#ladder-button{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:5px;padding:8px 10px;min-height:32px;max-width:155px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+#account-button:hover,#ladder-button:hover{border-color:var(--gold)}
+#account-dialog{max-width:660px;max-height:85dvh;padding:23px;overflow:auto;scrollbar-width:thin}
+#account-content{min-width:0}
+.account-tabs{display:flex;flex-wrap:wrap;gap:5px;border-bottom:1px solid var(--line);padding:6px 0 12px;margin-bottom:15px}
+.account-tabs button{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:5px;padding:8px 10px;font-size:11px;min-height:32px}
+.account-tabs button[aria-current=page]{color:var(--gold);border-color:var(--gold);background:var(--panel2)}
+.account-intro,.account-help,.account-private{font-size:11px;line-height:1.65;color:var(--muted);margin:8px 0 13px}
+.account-help{font-size:10px}.account-private{overflow-wrap:anywhere}
+.account-field{display:block;font-size:11px;line-height:1.5;color:var(--text);margin:12px 0}
+.account-field input{display:block;margin-top:6px;min-width:0;min-height:36px;padding:9px 10px;font-size:12px}
+.account-two-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#account-content form>.primary{margin-top:15px;min-height:36px}
+.account-message{padding:10px 12px;border:1px solid var(--accent);border-radius:5px;background:var(--panel2);font-size:11px;color:var(--text);line-height:1.6;overflow-wrap:anywhere}
+.account-message.account-error{border-color:var(--red);color:var(--text)}
+.account-footer-actions{display:flex;justify-content:space-between;gap:12px;margin-top:14px}
+.account-rating{text-align:center;padding:12px;background:var(--panel2);border:1px solid var(--line);border-radius:7px}
+.account-rating strong{display:block;font:38px/1.2 Georgia,serif;color:var(--gold);margin:5px 0}.account-tier{color:var(--gold);font-size:11px;text-transform:uppercase;letter-spacing:1.5px}.account-rating small{color:var(--muted);font-size:10px}
+.account-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;text-align:center;padding:14px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:9px}
+.account-stats strong{display:block;color:var(--text);font-size:17px;margin-bottom:5px;font-weight:normal}
+.account-table-scroll{max-width:100%;overflow:auto;scrollbar-width:thin}
+.account-table{border-collapse:collapse;width:100%;min-width:450px;font-size:11px}
+.account-table th,.account-table td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.account-table thead th{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:normal}
+.account-table tbody th{color:var(--text);font-weight:normal;max-width:170px;overflow:hidden;text-overflow:ellipsis}
+.account-empty{text-align:center;color:var(--muted);padding:18px 5px;font-size:12px;line-height:1.7}
+.account-match{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:13px 0;border-bottom:1px solid var(--line)}
+.account-match strong{font-size:12px;font-weight:normal}.account-match small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.account-match-change{color:var(--gold);font-size:12px}.account-match-change.positive{color:var(--accent)}.account-match-change.negative{color:var(--red)}.account-match p{flex-basis:100%;color:var(--muted);font-size:10px;line-height:1.7;margin:2px 0;overflow-wrap:anywhere}
+.account-admin-users{display:flex;flex-direction:column;gap:6px;max-height:250px;overflow:auto;scrollbar-width:thin}
+.account-admin-person{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;text-align:left;font-size:10px;color:var(--muted)}
+.account-admin-person>span:first-child{min-width:0;flex:1}.account-admin-person strong{display:block;color:var(--text);font-size:11px;font-weight:normal}.account-admin-person small{display:block;overflow-wrap:anywhere;line-height:1.5;margin-top:4px}.account-admin-person.selected{border-color:var(--gold)}
+.account-admin-detail{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:6px}.account-admin-detail h3{font:20px Georgia,serif;margin:0 0 12px;overflow-wrap:anywhere}.account-admin-detail h4{font-size:12px;font-weight:normal;margin:22px 0 10px}.account-admin-actions{display:flex;gap:8px;flex-wrap:wrap}.account-admin-actions button{flex:1 1 170px;min-height:36px;padding:8px;font-size:10px}
+@media(max-width:1050px){.top-actions{gap:5px}#account-button,#ladder-button{max-width:112px;padding:7px;font-size:10px}}
+@media(max-width:759px){#account-button,#ladder-button{max-width:90px;min-height:29px;padding:5px 7px;font-size:10px}.topbar{gap:6px}.top-actions{justify-content:flex-end;min-width:0}.topbar .breadcrumb{font-size:8px}#account-dialog{padding:17px}.account-tabs{gap:2px}.account-tabs button{padding:7px;font-size:10px}.account-two-fields{gap:9px}.account-stats{gap:4px;font-size:8px}.account-stats strong{font-size:15px}}
+@media(max-width:400px){.account-two-fields{grid-template-columns:1fr;gap:0}.account-admin-person{flex-wrap:wrap}.account-admin-person>span:last-child{flex-basis:100%}.account-rating strong{font-size:32px}.account-tabs button{padding:7px 6px}}
+
+@media(max-width:600px){.topbar .breadcrumb,.topbar .connection,.topbar .rules-button{display:none}.topbar .top-actions{width:100%;flex-wrap:nowrap;gap:5px}#account-button{max-width:90px}#ladder-button{max-width:72px}.topbar{height:43px}}
+.control-card .ranked-result{padding:10px;border:1px solid var(--gold);border-radius:5px;color:var(--gold);font-weight:bold;line-height:1.6}

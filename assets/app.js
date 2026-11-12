@@ -6,6 +6,7 @@
   const API_URL = document.querySelector('meta[name="troika-api"]')?.content || 'api.php';
   const CLOUD = API_URL.startsWith('/api/');
   const STANDARD_SETUP = {mode:'standard',maxPlayers:5,decks:1,burnRule:'any',jumpIn:false};
+  let draftRanked=false;
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
@@ -16,10 +17,12 @@
   const suits = {S:'♠',H:'♥',D:'♦',C:'♣'};
   const arrow = '<svg aria-hidden="true"><use href="#i-arrow"/></svg>';
   const tableSettings = () => game?.settings || (joinMode ? lobbyPreview?.settings || STANDARD_SETUP : draftSettings);
+  const accountUser=()=>window.TroikaAccounts?.user()||null;
+  const isRanked=()=>game?Boolean(game.ranked):joinMode?Boolean(lobbyPreview?.ranked):draftRanked;
   const capacity = () => tableSettings().maxPlayers;
   const seats = () => Array.from({length:capacity()},(_,i)=>i);
   const allSuits = () => tableSettings().burnRule==='all_suits';
-  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'} · ${allSuits()?'All four suits':'Any four burn'}${tableSettings().jumpIn?' · Jump-ins on':''}`;
+  const setupLabel = () => `${tableSettings().mode==='expanded'?'Expanded':'Standard'} · ${capacity()} seats · ${tableSettings().decks} ${tableSettings().decks===1?'deck':'decks'} · ${allSuits()?'All four suits':'Any four burn'}${tableSettings().jumpIn?' · Jump-ins on':''}${isRanked()?' · RANKED':' · Casual'}`;
   const me = () => game?.players.find(p => p.id === game.youId);
   const host = () => game && game.hostId === game.youId;
   const myTurn = () => game?.status === 'playing' && !game.paused && game.turnId === game.youId;
@@ -51,7 +54,10 @@
       const response = await fetch(API_URL, {method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',signal:controller.signal,body:JSON.stringify({action,...(auth && credentials ? credentials : {}),...data})});
       let result;
       try {result=await response.json();} catch {throw new Error(CLOUD?'The game server is not responding. Please refresh and try again.':'PHP is not responding. Open Troika through MAMP (not by double-clicking index.html).');}
-      if (!response.ok || result.error) throw new Error(result.error || 'The table could not complete that action.');
+      if (!response.ok || result.error) {
+        if(game?.ranked&&response.status===401){hideRankedSeat();window.TroikaAccounts?.refresh().catch(()=>{});}
+        throw new Error(result.error || 'The table could not complete that action.');
+      }
       return result;
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('The host took too long to respond. Keep this page open to reconnect.');
@@ -64,21 +70,23 @@
     store.set('seat.'+result.room,JSON.stringify(credentials));store.set('lastRoom',result.room);
     const url=new URL(location.href);url.searchParams.set('room',result.room);history.replaceState(null,'',url);
   }
-  function clearCredentials() {
+  function clearCredentials(forget=true) {
     dismissMatching();
     pileHistoryOpen=false;pileHistoryHovered=false;replaySnapshot=null;
     pendingKick=null;ownBlindRevealed=false;
     ['scoreboard-dialog','replay-dialog','players-dialog'].forEach(id=>{if($('#'+id).open)$('#'+id).close();});
-    if(credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
+    if(forget&&credentials){store.remove('seat.'+credentials.room);if(store.get('lastRoom')===credentials.room)store.remove('lastRoom');}
     credentials=null;game=null;selected=[];lastEvent=0;previousVersion=-1;lobbyPreview=null;draftRoom='';joinMode=false;
     const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);
   }
   function applyState(state) {
     if(!state || (game && game.room===state.room && state.version<game.version)) return;
+    if(state.ranked&&(!accountUser()||state.rankedAccountId!==accountUser().id))return;
     const wasTurn=myTurn(), oldStatus=game?.status, oldPhase=currentSource(), wasOffline=$('#connection').classList.contains('offline');
     if(!game || game.room!==state.room || game.round!==state.round || state.status!=='finished')ownBlindRevealed=false;
     if(game && (game.room!==state.room || game.round!==state.round || state.status!=='playing')){pileHistoryOpen=false;pileHistoryHovered=false;}
     game=state; setConnection(true);
+    if(game.ranked&&game.status==='finished'&&oldStatus!=='finished'&&accountUser())window.TroikaAccounts.refresh().catch(()=>{});
     if(pendingQuickPlay && (game.room!==pendingQuickPlay.room || game.version!==pendingQuickPlay.version || !myTurn() || currentSource()!=='hand'))dismissMatching();
     if ((!myTurn() && !hasJump()) || oldPhase !== currentSource()) selected=[];
     else {const p=me();const ids=currentSource()==='down'?p.downSlots:(p[currentSource()]||[]).map(c=>c.id);selected=selected.filter(id=>ids.includes(id) && (myTurn() || canJump(id,currentSource())));}
@@ -148,7 +156,12 @@
   function renderEntry() {
     const setup=tableSettings();
     const choices=!joinMode?`<label class="field-label">TABLE STYLE</label><div class="mode-picker" role="group" aria-label="Table style"><button type="button" id="mode-standard" data-mode-choice="standard" class="${draftSettings.mode==='standard'?'chosen':''}" aria-pressed="${draftSettings.mode==='standard'}"><strong>Standard</strong><small>5 seats · 1 deck</small></button><button type="button" id="mode-expanded" data-mode-choice="expanded" class="${draftSettings.mode==='expanded'?'chosen':''}" aria-pressed="${draftSettings.mode==='expanded'}"><strong>Expanded</strong><small>9–12 seats · 2–4 decks</small></button></div>${draftSettings.mode==='expanded'?`<div class="expanded-options"><label class="field-label" for="seat-count">TABLE SEATS<select id="seat-count">${[9,10,11,12].map(n=>`<option value="${n}" ${setup.maxPlayers===n?'selected':''}>${n} seats</option>`).join('')}</select></label><label class="field-label" for="deck-count">CARD DECKS<select id="deck-count">${[2,3,4].map(n=>`<option value="${n}" ${setup.decks===n?'selected':''} ${n===2&&setup.maxPlayers===12?'disabled':''}>${n} decks</option>`).join('')}</select></label></div><p class="setup-note" role="status">${setup.maxPlayers===12?'12 seats need at least 3 decks: the deal uses 108 cards.':'Each player gets 9 cards. Choose below whether four-card burns require all suits.'}</p>`:''}`:'<div id="join-settings" class="settings-summary">'+(lobbyPreview?esc(setupLabel()):'Enter a table code to see its settings.')+'</div>';
-    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}${!joinMode?`<label class="field-label" for="burn-rule">FOUR-CARD BURN RULE</label><select id="burn-rule" class="secondary"><option value="any" ${draftSettings.burnRule!=='all_suits'?'selected':''}>Suits don’t matter — any four</option><option value="all_suits" ${draftSettings.burnRule==='all_suits'?'selected':''}>Suits matter — need ♠ ♥ ♦ ♣</option></select>`:''}${!joinMode?`<label class="option-toggle" for="jump-in"><input id="jump-in" type="checkbox" ${draftSettings.jumpIn?'checked':''}><span><strong>Jump-in burns</strong><small>Complete a burn out of turn and steal the next turn.</small></span></label>`:''}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
+    $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${joinMode?'GOOD TO HAVE YOU':'THE NIGHT STARTS HERE'}</div><h2>${joinMode?'Join the table.':'Pull up a chair.'}</h2><p>${joinMode?'Enter your table code, choose a free seat, and settle in.':'Choose your table style, then invite friends or practice with bots.'}</p><form id="entry-form"><label class="field-label" for="nickname">YOUR NICKNAME</label><input id="nickname" name="nickname" placeholder="What should we call you?" maxlength="20" required autocomplete="nickname" value="${esc(draftName)}">${joinMode?`<label class="field-label" for="room-input">TABLE CODE</label><input id="room-input" name="room" placeholder="e.g. A7K9M" value="${esc(draftRoom)}" maxlength="5" minlength="5" required autocapitalize="characters" autocomplete="off" spellcheck="false">`:''}${choices}${!joinMode?`<label class="field-label" for="burn-rule">FOUR-CARD BURN RULE</label><select id="burn-rule" class="secondary"><option value="any" ${draftSettings.burnRule!=='all_suits'?'selected':''}>Suits don’t matter — any four</option><option value="all_suits" ${draftSettings.burnRule==='all_suits'?'selected':''}>Suits matter — need ♠ ♥ ♦ ♣</option></select>`:''}${!joinMode?`<label class="option-toggle" for="jump-in"><input id="jump-in" type="checkbox" ${draftSettings.jumpIn?'checked':''}><span><strong>Jump-in burns</strong><small>Complete a burn out of turn and steal the next turn.</small></span></label>`:''}<label class="field-label">CHOOSE YOUR SEAT</label><div id="entry-seat-picker" class="seat-picker" role="group" aria-label="Choose a table seat">${seatButtons()}</div><div id="form-error" class="form-error" role="alert" hidden></div><button class="primary" type="submit">${joinMode?'Join table':'Create a table'} ${arrow}</button>${!joinMode?'<div class="or-line">OR GO SOLO</div><button class="secondary" type="button" id="practice-button">♧ &nbsp; Practice with bots · casual</button>':''}<div class="join-switch">${joinMode?'Starting something new? <button type="button" id="mode-switch">Host a table</button>':'Already have a code? <button type="button" id="mode-switch">Join a table</button>'}</div></form></div>`;
+    if(CLOUD){
+      const user=accountUser();
+      if(user){$('#nickname').value=user.nickname;$('#nickname').readOnly=true;draftName=user.nickname;}
+      if(!joinMode)$('#entry-seat-picker').previousElementSibling.insertAdjacentHTML('beforebegin',`<label class="option-toggle" for="ranked-play"><input type="checkbox" id="ranked-play" ${draftRanked?'checked':''} ${user?'':'disabled'}><span><strong>Ranked game</strong><small>${user?'Human accounts only · finishing place changes Elo.':'Sign in to enable rankings. Casual play needs no account.'}</small></span></label>`);
+    }
   }
   function seatAttributes(seat) {
     const slot=capacity()>5 && game ? (seat-me().seat+capacity())%capacity() : seat;
@@ -164,7 +177,7 @@
     const players=game?.players || lobbyPreview?.players || [];
     const markup=seats().map(seat=>{
       const p=players.find(p=>p.seat===seat);
-      if(!p) return `<div class="seat" ${seatAttributes(seat)}><button class="empty-seat ${!game&&chosenSeat===seat?'chosen':''}" data-seat-click="${seat}" aria-label="${game && host()?'Add bot at':'Choose'} seat ${seat+1}" ${game && (game.status!=='lobby'||!host()&&me()?.seat===seat)?'disabled':''}>+</button><span class="seat-caption">${!game&&chosenSeat===seat?'YOUR SPOT':game&&host()&&game.status==='lobby'?'ADD BOT':'SEAT '+(seat+1)}</span></div>`;
+      if(!p) return `<div class="seat" ${seatAttributes(seat)}><button class="empty-seat ${!game&&chosenSeat===seat?'chosen':''}" ${game?.ranked&&host()?'data-copy':'data-seat-click="'+seat+'"'} aria-label="${game?.ranked&&host()?'Invite player to':game && host()?'Add bot at':'Choose'} seat ${seat+1}" ${game && (game.status!=='lobby'||!host()&&me()?.seat===seat)?'disabled':''}>+</button><span class="seat-caption">${!game&&chosenSeat===seat?'YOUR SPOT':game&&host()&&game.status==='lobby'?(game.ranked?'INVITE':'ADD BOT'):'SEAT '+(seat+1)}</span></div>`;
       const self=Boolean(game && p.id===game.youId),active=Boolean(game && p.id===game.turnId);
       let reserves='';
       if(game && game.status!=='lobby') {
@@ -185,7 +198,7 @@
     $('#subtitle').textContent=game.status==='lobby'?'Choose your seats. Invite your friends. Let the cards do the rest.':game.status==='finished'?'The cards have spoken. There’s always another round.':'Play it smart. Burn the pile. Get out before everyone else.';
     $('#table-badge').innerHTML=`<span class="live-dot"></span> ${game.status==='lobby'?capacity()+' SEATS':'ROUND '+game.round} · ${tableSettings().decks} ${tableSettings().decks===1?'DECK':'DECKS'}`;
     $('#room-panel').innerHTML=`<div class="room-tag"><small>YOUR PRIVATE TABLE</small><div><span class="room-code">${esc(game.room)}</span><button class="icon-button" data-copy aria-label="Copy invitation link"><svg><use href="#i-copy"/></svg></button></div><button class="text-button" data-leave>Leave table ↗</button></div>`;
-    renderPlayers();renderSeats();renderCenter();renderHand();renderControls();renderSessionTools();
+    renderPlayers();renderSeats();renderCenter();renderHand();renderControls();renderRankedResult();renderSessionTools();
     if($('#scoreboard-dialog').open)renderScoreboard();
     if($('#players-dialog').open)renderManagePlayers();
     const feed=[...game.events].reverse().slice(0,14).map(eventHTML).join('');
@@ -296,6 +309,18 @@
     const turnPlayer=game.players.find(x=>x.id===game.turnId);
     $('#control-panel').innerHTML=`<div class="control-card"><div class="eyebrow">${p.finish?'NICE WORK':myTurn()?'THE TABLE IS YOURS':'KEEP YOUR CARDS CLOSE'}</div><h2>${p.finish?'You’re all clear.':myTurn()?'Make your move.':esc(turnPlayer?.name)+'’s turn.'}</h2><p>${p.finish?'Enjoy the show. You’ve played your last card.':myTurn()?phase==='down'?'One blind card at a time. Fortune favours the brave.':phase==='up'?'Your hand is empty. Time to play the face-up cards.':'Match the pile or go higher. A 6 resets. A 10 burns.':'Watch the pile. Plan your next play.'}</p><div class="stage-list">${phases.map(([id,label,count],i)=>`<div class="stage-item ${id===phase?'current':i<current||p.finish?'done':''}"><span class="stage-number">${i<current||p.finish?'✓':i+1}</span><span>${label}</span><strong style="margin-left:auto;font-size:10px;font-weight:normal">${count}</strong></div>`).join('')}</div><div class="stat-row"><span>Your burns</span><strong>${p.stats.burns}</strong></div><div class="stat-row"><span>Your pickups</span><strong>${p.stats.pickups}</strong></div><p class="small-note">${game.deckCount?'Draw back to three after playing. '+game.deckCount+' cards left in the deck.':'The deck is empty. Every card counts now.'}</p><button class="text-button" data-leave>Leave · a bot takes your seat</button></div>`;
   }
+  function renderRankedResult(){
+    if(!game.ranked)return;
+    $('#table-badge').append(document.createTextNode(' · RANKED'));
+    const card=$('#control-panel .control-card');if(!card)return;
+    if($('#add-bot-button'))$('#add-bot-button').hidden=true;
+    const rating=game.ranking;
+    if(game.status==='finished'){
+      const own=rating?.results?.find(r=>r.playerId===game.youId);
+      const message=rating?.status==='void'?'Ratings unchanged: the host kicked a player during this round.':own?`${own.change>0?'+':''}${own.change} Elo · ${own.after} · ${own.tier}`:'Recording the ranked result…';
+      card.insertAdjacentHTML('beforeend',`<p class="ranked-result" role="status">${esc(message)}</p>`);
+    }else if(game.status==='playing')card.insertAdjacentHTML('beforeend','<p class="small-note muted">Ranked round · leaving keeps your final result. A host kick voids rating changes.</p>');
+  }
   function selectCard(id,source) {
     if(busy||source!==currentSource()||(!myTurn()&&!canJump(id,source)))return;
     if(!myTurn()){selected=selected.includes(id)?[]:[id];if(source==='hand')paintHandSelection();else renderHand();renderSeats();return;}
@@ -400,7 +425,7 @@
     if(!draftName){$('#nickname').focus();return;}
     busy=true;document.body.classList.add('busy');
     try {
-      const result=await request(joinMode?'join':'create',{nickname:draftName,seat:chosenSeat,...(joinMode?{room:draftRoom}:draftSettings)},false);
+      const result=await request(joinMode?'join':'create',{nickname:draftName,seat:chosenSeat,...(joinMode?{room:draftRoom}:{...draftSettings,...(CLOUD?{ranked:draftRanked&&!practice}:{})})},false);
       saveCredentials(result);store.set('nickname',draftName);applyState(result.state);
       if(practice) {
         const free=seats().filter(i=>i!==chosenSeat);
@@ -422,7 +447,29 @@
     if(e.target.id==='nickname')draftName=e.target.value;
     if(e.target.id==='room-input'){draftRoom=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);e.target.value=draftRoom;lobbyPreview=null;if(draftRoom.length===5)previewLobby();}
   });
+  let restoringSeat=false;
+  function hideRankedSeat(){
+    const room=credentials?.room;clearCredentials(false);draftRoom=room||'';joinMode=Boolean(room);
+    if(room){const url=new URL(location.href);url.searchParams.set('room',room);history.replaceState(null,'',url);}
+    renderHome();
+  }
+  async function restoreSavedSeat(){
+    if(game||restoringSeat||!accountUser())return;
+    const room=store.get('lastRoom');if(!room||(draftRoom&&draftRoom!==room))return;
+    let saved;try{saved=JSON.parse(store.get('seat.'+room)||'null');}catch{return;}
+    if(!saved?.token)return;
+    const userId=accountUser().id;restoringSeat=true;
+    try{credentials=saved;const result=await request('state');if(accountUser()?.id===userId)applyState(result.state);}
+    catch{credentials=null;setConnection(true,CLOUD?'ONLINE PLAY':'LOCAL PLAY');}
+    finally{restoringSeat=false;}
+  }
+  document.addEventListener('troika-account-change',()=>{
+    const user=accountUser();if(!user)draftRanked=false;
+    if(game?.ranked&&(!user||game.rankedAccountId!==user.id))hideRankedSeat();
+    if(!game){renderEntry();renderSeats();if(user)restoreSavedSeat();}
+  });
   document.addEventListener('change',e=>{
+    if(e.target.id==='ranked-play'&&!game&&!joinMode){draftRanked=Boolean(accountUser()&&e.target.checked);return;}
     if(e.target.id==='jump-in'&&!game&&!joinMode){draftSettings.jumpIn=e.target.checked;expandedSetup.jumpIn=e.target.checked;return;}
     if(e.target.id==='burn-rule' && !game && !joinMode){draftSettings.burnRule=e.target.value;expandedSetup.burnRule=e.target.value;renderEntry();renderSeats();return;}
     if(e.target.id!=='seat-count' && e.target.id!=='deck-count')return;

@@ -29,6 +29,7 @@ try {
         rejects(fn() => request($db, 'create', [], ['nickname' => $nickname]), 'invalid nickname rejected');
     }
     foreach ([-1, 5, '1', 1.2] as $seat) rejects(fn() => request($db, 'create', [], ['nickname' => 'Host', 'seat' => $seat]), 'invalid seat rejected');
+    rejects(fn() => request($db,'create',[],['nickname'=>'Host','ranked'=>true]),'local MAMP cannot create an untracked ranked table');
     $host = request($db, 'create', [], ['nickname' => 'Host', 'seat' => 4]);
     $hc = ['room' => $host['room'], 'token' => $host['token']];
     check(strlen($host['token']) === 48 && strlen($host['room']) === 5, 'opaque host token and short table code issued');

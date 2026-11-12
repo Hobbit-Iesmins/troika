@@ -1,6 +1,8 @@
 # Troika
 
-A card game for 2–5 players in Standard mode, or up to 12 players in Expanded mode, with practice bots, private hands, selectable seats, and switchable table themes. Run it on your local network with MAMP, or host it online with Vercel and PostgreSQL. Players do not need accounts.
+A card game for 2–5 players in Standard mode, or up to 12 players in Expanded mode, with practice bots, private hands, selectable seats, and switchable table themes. Run it on your local network with MAMP, or host it online with Vercel and PostgreSQL. Casual players do not need accounts. Online accounts unlock ranked games, profiles, match history, and the Elo ladder.
+
+See [Accounts and rankings](docs/ACCOUNTS.md) for registration, private owner setup, password recovery, and rating rules.
 
 ## Choose how to host
 

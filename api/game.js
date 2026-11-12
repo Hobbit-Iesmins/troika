@@ -46,8 +46,9 @@ function createHandler(options = {}) {
     const contentType = req.headers['content-type'] || '';
     if (!/^application\/json(?:\s*;|\s*$)/i.test(contentType)) { respond(res, 415, { error: 'Send this request as JSON.' }); return; }
     try {
+      require('../cloud/accounts.js').checkOrigin(req);
       const body = await readBody(req);
-      const result = await dispatch(await getPool(), body);
+      const result = await dispatch(await getPool(), body,{cookie:req.headers.cookie||''});
       respond(res, 200, result);
     } catch (error) {
       if (error instanceof GameError) respond(res, error.status || 400, { error: error.message });

@@ -5,8 +5,10 @@
   <meta name="troika-api" content="api.php">
   <meta name="theme-color" content="#101d1b"><meta name="description" content="Troika. A local card table for good company and bad hands. Play your Latvian house rules with friends or bots.">
   <title>Troika — Your table. Your rules.</title>
-  <link rel="icon" type="image/svg+xml" href="assets/mark.svg"><link rel="stylesheet" href="assets/style.css?v=12">
-  <script src="assets/app.js?v=12" defer></script>
+  <link rel="icon" type="image/svg+xml" href="assets/mark.svg"><link rel="stylesheet" href="assets/style.css?v=13">
+  <link rel="stylesheet" href="assets/accounts.css?v=13">
+  <script src="assets/accounts.js?v=13" defer></script>
+  <script src="assets/app.js?v=13" defer></script>
 </head>
 <body>
 <svg class="svg-defs" aria-hidden="true"><defs>
@@ -29,7 +31,7 @@
     <div class="sidebar-bottom"><span class="local-dot"></span><div>Made for the same table.<small>Local network · No accounts</small></div></div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="breadcrumb">CLUBHOUSE <span>/</span> <strong id="page-label">The card room</strong></div><div class="top-actions"><span id="connection" class="connection"><i></i> LOCAL PLAY</span><button id="talk-toggle" class="icon-button talk-toggle" aria-label="Open Table Talk" title="Table Talk"><svg aria-hidden="true"><use href="#i-talk"/></svg></button><button id="sound-toggle" class="icon-button" aria-label="Enable sound" title="Enable sound"><svg><use href="#i-sound"/></svg><span class="sound-off">/</span></button><div class="theme-wrap"><button id="theme-toggle" class="icon-button" aria-label="Change table theme" title="Table themes" aria-expanded="false"><svg><use href="#i-skin"/></svg></button><div id="theme-menu" class="theme-menu" hidden></div></div><button class="rules-button" data-rules>How to play <span>↗</span></button></div></header>
+    <header class="topbar"><div class="breadcrumb">CLUBHOUSE <span>/</span> <strong id="page-label">The card room</strong></div><div class="top-actions"><button id="account-button" class="account-nav-button" hidden>Account</button><button id="ladder-button" class="account-nav-button" hidden>Rankings</button><span id="connection" class="connection"><i></i> LOCAL PLAY</span><button id="talk-toggle" class="icon-button talk-toggle" aria-label="Open Table Talk" title="Table Talk"><svg aria-hidden="true"><use href="#i-talk"/></svg></button><button id="sound-toggle" class="icon-button" aria-label="Enable sound" title="Enable sound"><svg><use href="#i-sound"/></svg><span class="sound-off">/</span></button><div class="theme-wrap"><button id="theme-toggle" class="icon-button" aria-label="Change table theme" title="Table themes" aria-expanded="false"><svg><use href="#i-skin"/></svg></button><div id="theme-menu" class="theme-menu" hidden></div></div><button class="rules-button" data-rules>How to play <span>↗</span></button></div></header>
     <div class="content-heading"><div><div class="eyebrow">GOOD COMPANY. BAD HANDS.</div><h1 id="headline">Your table. Your rules.</h1><p id="subtitle">A little strategy. A little luck. Just don’t be the last one holding cards.</p></div><div id="table-badge" class="table-badge"><span class="live-dot"></span> STANDARD OR EXPANDED</div><div id="session-tools" class="session-tools" hidden></div></div>
     <div class="play-layout">
       <section class="table-column" aria-label="Card table">
@@ -41,6 +43,7 @@
     </div>
   </main>
 </div>
+<dialog id="account-dialog" aria-labelledby="account-title"><div id="account-content"></div></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <dialog id="players-dialog" aria-labelledby="players-title"><div class="dialog-heading"><div><div class="eyebrow">HOST CONTROLS</div><h2 id="players-title">Manage players</h2></div><button class="icon-button close-players-dialog" aria-label="Close player management">×</button></div><div id="players-content"></div></dialog>
 <dialog id="scoreboard-dialog" aria-labelledby="scoreboard-title"><div class="dialog-heading"><div><div class="eyebrow">THE SESSION SO FAR</div><h2 id="scoreboard-title">Scoreboard</h2></div><button class="icon-button close-scoreboard-dialog" aria-label="Close scoreboard">×</button></div><div id="scoreboard-content"></div></dialog>

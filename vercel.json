@@ -8,9 +8,9 @@
     "fra1"
   ],
   "functions": {
-    "api/game.js": {
+    "api/*.js": {
       "maxDuration": 15,
-      "includeFiles": "cloud/certs/**"
+      "includeFiles": "cloud/**"
     }
   },
   "rewrites": [

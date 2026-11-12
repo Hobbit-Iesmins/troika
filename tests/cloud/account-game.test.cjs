@@ -1,0 +1,45 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),{randomBytes}=require('node:crypto');
+const fs=require('node:fs'),path=require('node:path'),{JSDOM}=require('jsdom'),{Pool}=require('pg');
+const {tk_dispatch,initDatabase}=require('../../cloud/service.js'),A=require('../../cloud/accounts.js'),E=require('../../cloud/engine.js');
+const {createHandler:accountHandler}=require('../../api/account.js'),{createHandler:gameHandler}=require('../../api/game.js'),{createHandler:ladderHandler}=require('../../api/ladder.js');
+const connectionString=process.env.TEST_DATABASE_URL,root=path.resolve(__dirname,'../..');
+async function database(fn){const schema='troika_account_game_'+randomBytes(8).toString('hex'),admin=new Pool({connectionString,max:1});let pool;try{await admin.query('CREATE SCHEMA '+schema);pool=new Pool({connectionString,max:5,options:'-c search_path='+schema});await initDatabase(pool);await fn(pool);}finally{await pool?.end();await admin.query('DROP SCHEMA IF EXISTS '+schema+' CASCADE');await admin.end();}}
+const account=async(pool,n)=>{const r=await A.dispatchAccount(pool,{action:'register',email:n+'@example.test',nickname:n,password:'test-password-only'},{secure:false,ip:n});return {user:r.body.user,cookie:r.cookie.split(';')[0]};};
+const auth=r=>({room:r.room,token:r.token});
+async function finish(pool,room,winner){const g=(await pool.query('SELECT state FROM troika_rooms WHERE code=$1',[room])).rows[0].state;g.status='finished';g.turnId=null;g.results=[winner,...g.players.filter(p=>p.id!==winner).map(p=>p.id)];g.players.forEach(p=>p.finish=g.results.indexOf(p.id)+1);E.tk_touch(g,'Test completion','result');await pool.query('UPDATE troika_rooms SET state=$2::jsonb WHERE code=$1',[room,JSON.stringify(g)]);}
+test('ranked game authenticates account seats, records once, keeps leavers and voids host kicks',{skip:!connectionString},async()=>database(async pool=>{
+ const users=await Promise.all(['Ada','Boris','Cora'].map(n=>account(pool,n)));
+ const req=(i,body)=>tk_dispatch(pool,body,{cookie:users[i]?.cookie});
+ await assert.rejects(()=>tk_dispatch(pool,{action:'create',ranked:true,nickname:'Fake',seat:0}),e=>e.status===401);
+ const host=await req(0,{action:'create',ranked:true,nickname:'Forged',seat:0});assert.equal(host.state.players[0].name,'Ada');assert.equal(host.state.ranked,true);
+ await assert.rejects(()=>req(0,{action:'join',room:host.room,seat:1}));await assert.rejects(()=>tk_dispatch(pool,{action:'join',room:host.room,nickname:'Guest',seat:1}),e=>e.status===401);
+ const guests=[];for(let i=1;i<3;i++){const r=await req(i,{action:'join',room:host.room,seat:i});guests.push(r);await req(i,{action:'ready',...auth(r),ready:true});}
+ await assert.rejects(()=>req(0,{action:'bot',...auth(host),seat:4}));await assert.rejects(()=>req(1,{action:'state',...auth(host)}),e=>e.status===401);
+ await req(0,{action:'start',...auth(host)});await req(1,{action:'leave',...auth(guests[0])});await finish(pool,host.room,host.state.youId);
+ const rated=(await req(0,{action:'state',...auth(host)})).state;assert.equal(rated.ranking.status,'rated');assert.equal(rated.ranking.results.length,3);assert.ok(rated.ranking.results.some(r=>r.accountId===users[1].user.id));
+ await req(0,{action:'state',...auth(host)});assert.equal((await pool.query('SELECT rated_games FROM troika_accounts WHERE id=$1',[users[0].user.id])).rows[0].rated_games,1);
+ const second=await req(0,{action:'create',ranked:true,seat:0});const peer=await req(2,{action:'join',room:second.room,seat:1});await req(2,{action:'ready',...auth(peer),ready:true});await req(0,{action:'start',...auth(second)});await req(0,{action:'kick',...auth(second),playerId:peer.state.youId});await finish(pool,second.room,second.state.youId);
+ const voided=(await req(0,{action:'state',...auth(second)})).state;assert.equal(voided.ranking.status,'void');assert.ok(voided.ranking.results.every(r=>r.change===0));assert.equal((await pool.query('SELECT rated_games FROM troika_accounts WHERE id=$1',[users[0].user.id])).rows[0].rated_games,1);
+}));
+function page(pool,url='https://troika.test/'){
+ const handlers={'/api/account':accountHandler({pool}),'/api/game':gameHandler({pool}),'/api/ladder':ladderHandler({pool})};
+ const dom=new JSDOM(fs.readFileSync(path.join(root,'index.html'),'utf8').replace('content="api.php"','content="/api/game"'),{url,pretendToBeVisual:true,runScripts:'outside-only'}),w=dom.window,timers=new Map();let pending=0,tid=0,cookie='';
+ w.setTimeout=(fn,ms)=>{timers.set(++tid,{fn,ms});return tid;};w.clearTimeout=id=>timers.delete(id);w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
+ w.fetch=async(endpoint,options)=>{pending++;try{let output='',nextCookie;const req={method:'POST',headers:{'content-type':'application/json',host:'troika.test',origin:'https://troika.test',cookie},body:JSON.parse(options.body)},res={statusCode:200,setHeader(k,v){if(k==='Set-Cookie')nextCookie=v;},end(v){output=v;}};await handlers[endpoint](req,res);if(nextCookie)cookie=nextCookie.split(';')[0];return {ok:res.statusCode===200,status:res.statusCode,json:async()=>JSON.parse(output)};}finally{pending--;}};
+ for(const script of ['accounts.js','app.js'])w.eval(fs.readFileSync(path.join(root,'assets',script),'utf8'));
+ const settle=async()=>{for(let i=0;i<500;i++){await new Promise(r=>setTimeout(r,10));if(pending===0){await new Promise(r=>setImmediate(r));if(pending===0)return;}}assert.fail('UI did not settle');};
+ return {w,$:s=>w.document.querySelector(s),settle,async click(s){assert.ok(this.$(s),s);this.$(s).click();await settle();},input(s,v){this.$(s).value=v;this.$(s).dispatchEvent(new w.Event('input',{bubbles:true}));},async submit(s){this.$(s).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await settle();},async poll(){const entry=[...timers].find(([,t])=>t.ms===1000);assert.ok(entry);timers.delete(entry[0]);await entry[1].fn();await settle();},close(){w.close();}};
+}
+test('real account UI registration, ranked lobby, result Elo refresh and private match history',{skip:!connectionString},async()=>database(async pool=>{
+ let host,guest;try{
+  host=page(pool);await host.settle();assert.equal(host.$('#account-button').hidden,false);assert.equal(host.$('#ranked-play').disabled,true);
+  async function register(p,name){await p.click('#account-button');await p.click('[data-account-view="register"]');p.input('#account-dialog [name="nickname"]',name);p.input('#account-dialog [name="email"]',name+'@example.test');p.input('#account-dialog [name="password"]','test-password-only');await p.submit('#account-dialog form');assert.ok(p.w.TroikaAccounts.user(),p.$('#account-message')?.textContent);assert.equal(p.w.TroikaAccounts.user().nickname,name);await p.click('#account-close');}
+  await register(host,'UIAda');assert.equal(host.$('#ranked-play').disabled,false);host.$('#ranked-play').checked=true;host.$('#ranked-play').dispatchEvent(new host.w.Event('change',{bubbles:true}));await host.submit('#entry-form');const room=host.w.localStorage.getItem('troika.lastRoom');assert.ok(room);assert.equal(host.$('#add-bot-button').hidden,true);
+  guest=page(pool,'https://troika.test/?room='+room);await guest.settle();await register(guest,'UIBoris');await guest.submit('#entry-form');await guest.click('#ready-button');await host.poll();await host.click('#start-button');
+  await host.click('#account-button');await host.click('#account-logout');assert.equal(host.w.document.body.dataset.gameStatus,'home');assert.equal(host.$('#hand-panel [data-card]'),null,'signout immediately conceals a ranked hand');assert.ok(host.w.localStorage.getItem('troika.seat.'+room),'reconnect seat is retained privately');
+  host.input('#account-dialog [name="email"]','UIAda@example.test');host.input('#account-dialog [name="password"]','test-password-only');await host.submit('#account-dialog form');await host.click('#account-close');assert.equal(host.w.document.body.dataset.gameStatus,'playing','the original account can reconnect to its seat');
+  const g=(await pool.query('SELECT state FROM troika_rooms WHERE code=$1',[room])).rows[0].state;await finish(pool,room,g.hostId);await host.poll();await guest.poll();assert.equal(host.w.TroikaAccounts.user().elo,532);assert.equal(guest.w.TroikaAccounts.user().elo,468);assert.ok(host.$('#control-panel .ranked-result').textContent.includes('+32 Elo'));assert.ok(host.$('#account-button').textContent.includes('532'));
+  await host.click('#account-button');await host.click('[data-account-view="history"]');assert.ok(host.$('#account-content').textContent.includes('UIBoris'));assert.ok(!host.$('#account-content').textContent.includes('UIBoris@example.test'));await host.click('#account-close');await host.click('#ladder-button');assert.ok(host.$('#account-content').textContent.includes('UIAda'));assert.ok(!host.$('#account-content').textContent.includes('@example.test'));
+ }finally{host?.close();guest?.close();}
+}));

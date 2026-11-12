@@ -1,0 +1,132 @@
+'use strict';
+(() => {
+  const $=selector=>document.querySelector(selector);
+  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const cloud=$('meta[name="troika-api"]')?.content.startsWith('/api/');
+  const dialog=$('#account-dialog'),content=$('#account-content');
+  if(!dialog||!content)return;
+  let user=null,view='login',pending=false,claimToken='',resetToken='',message='',error=false,players=[],matches=[],users=[],selectedUser=null,resetLink='';
+  const rank=elo=>elo>=2000?'Grandmaster':elo>=1800?'Master':elo>=1600?'Diamond':elo>=1400?'Platinum':elo>=1200?'Gold':elo>=1000?'Silver':elo>=800?'Bronze':elo>=600?'Rookie':'Trash';
+  const amount=n=>Number.isFinite(Number(n))?Number(n):0;
+  const sign=n=>amount(n)>0?'+'+amount(n):String(amount(n));
+  const date=value=>{const d=new Date(value);return Number.isNaN(d.getTime())?'':d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});};
+  async function request(action,data={},endpoint='/api/account') {
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+    try{
+      const response=await fetch(endpoint,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...data}),signal:controller.signal});
+      let result;try{result=await response.json();}catch{throw new Error('The account service is not responding. Try again.');}
+      if(!response.ok||result.error)throw new Error(result.error||'The request could not be completed.');
+      return result;
+    }catch(e){if(e.name==='AbortError')throw new Error('The request took too long. Try again.');throw e;}
+    finally{clearTimeout(timer);}
+  }
+  function announce(next) {
+    if(user?.id!==next?.id){players=[];matches=[];users=[];selectedUser=null;resetLink='';}
+    user=next||null;
+    const button=$('#account-button');if(button){button.textContent=user?user.nickname+' · '+amount(user.elo):'Account';button.setAttribute('aria-label',user?'Open account for '+user.nickname:'Sign in or create an account');}
+    document.dispatchEvent(new CustomEvent('troika-account-change',{detail:{user}}));
+  }
+  async function refresh() {
+    if(!cloud)return null;
+    const result=await request('me');const previous=user?.id;announce(result.user);
+    if(dialog.open&&!claimToken&&!resetToken&&(previous!==user?.id||view==='profile')){view=user?'profile':'login';render();}
+    return user;
+  }
+  function status(text,isError=false){message=text;error=isError;const el=$('#account-message');if(el){el.textContent=text;el.classList.toggle('account-error',isError);el.hidden=!text;}}
+  function field(label,name,{type='text',value='',required=false,autocomplete='',max=100,min=null}={}) {
+    return `<label class="account-field">${label}<input name="${name}" type="${type}" value="${esc(value)}" ${required?'required':''} maxlength="${max}" ${min!==null?'minlength="'+min+'"':''} ${autocomplete?'autocomplete="'+autocomplete+'"':''}></label>`;
+  }
+  const passwordField=(name='password',label='Password',current=false)=>field(label,name,{type:'password',required:true,min:current?1:10,max:128,autocomplete:current?'current-password':'new-password'});
+  const submit=(text)=>`<button class="primary" type="submit">${text}</button>`;
+  function tabs() {
+    const list=user?[['profile','My profile'],['history','Match history'],['ladder','Rankings'],...(user.role==='admin'?[['admin','Admin']]:[])]:[['login','Sign in'],['register','Create account'],['ladder','Rankings']];
+    return `<nav class="account-tabs" aria-label="Account sections">${list.map(([id,label])=>`<button type="button" data-account-view="${id}" ${view===id?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
+  }
+  function body() {
+    if(view==='login')return `<p class="account-intro">Sign in for ranked tables and a place on the ladder. Casual games still work without an account.</p><form data-account-form="login">${field('Email','email',{type:'email',required:true,autocomplete:'email',max:254})}${passwordField('password','Password',true)}${submit('Sign in')}</form><button class="text-button" data-account-view="forgot">Forgot your password?</button>`;
+    if(view==='register')return `<p class="account-intro">${claimToken?'Create your owner account to unlock the admin controls. Use the email address you gave for setup.':'Your nickname appears at the table. Your email and optional real name stay private.'}</p><form data-account-form="register">${field('Nickname','nickname',{required:true,max:20,autocomplete:'nickname'})}${field('Email','email',{type:'email',required:true,max:254,autocomplete:'email'})}<div class="account-two-fields">${field('First name · optional','firstName',{max:60,autocomplete:'given-name'})}${field('Last name · optional','lastName',{max:60,autocomplete:'family-name'})}</div>${passwordField()}<p class="account-help">Use at least 10 characters. Nobody, including the administrator, can read your password.</p>${submit(claimToken?'Create owner account':'Create account')}</form>`;
+    if(view==='forgot')return `<p class="account-intro">The table administrator can give you a private password-reset link. Your password is never shown to anyone.</p><form data-account-form="forgot">${field('Your account email','email',{type:'email',required:true,autocomplete:'email',max:254})}${submit('Recovery instructions')}</form>`;
+    if(view==='reset')return `<p class="account-intro">Choose a new password. This private link can be used once and expires after 15 minutes.</p><form data-account-form="reset">${passwordField('password','New password')}${submit('Set new password')}</form>`;
+    if(view==='password')return `<form data-account-form="password">${passwordField('currentPassword','Current password',true)}${passwordField('password','New password')}${submit('Change password')}</form><button class="text-button" data-account-view="profile">Back to my profile</button>`;
+    if(view==='profile'&&user){const played=amount(user.ratedGames),avg=played?(amount(user.placementSum)/played).toFixed(1):'—';return `<div class="account-rating"><span class="account-tier">${esc(rank(user.elo))}</span><strong>${amount(user.elo)}</strong><small>ELO · ${played<10?(10-played)+' placement matches left':'Established rating'}</small></div><div class="account-stats"><span><strong>${played}</strong>Matches</span><span><strong>${amount(user.wins)}</strong>Wins</span><span><strong>${amount(user.lastPlaces)}</strong>Last place</span><span><strong>${avg}</strong>Avg. place</span><span><strong>${amount(user.peakElo)}</strong>Peak Elo</span></div><form data-account-form="profile">${field('Nickname','nickname',{value:user.nickname,required:true,max:20,autocomplete:'nickname'})}<p class="account-private">${esc(user.email)} · Private account email</p><div class="account-two-fields">${field('First name · optional','firstName',{value:user.firstName,max:60,autocomplete:'given-name'})}${field('Last name · optional','lastName',{value:user.lastName,max:60,autocomplete:'family-name'})}</div>${submit('Save profile')}</form><div class="account-footer-actions"><button class="text-button" data-account-view="password">Change password</button><button class="text-button" id="account-logout">Sign out</button></div>`;}
+    if(view==='ladder')return `<p class="account-intro">Ranked games compare your finishing position with every opponent. Stronger opponents mean bigger rewards. New players start at 500 Elo.</p><div class="account-table-scroll"><table class="account-table"><thead><tr><th>#</th><th>Player</th><th>Tier</th><th>Elo</th><th>Played</th><th>Wins</th></tr></thead><tbody>${players.map((p,i)=>`<tr><td>${i+1}</td><th scope="row">${esc(p.nickname)}</th><td>${esc(p.tier||rank(p.elo))}</td><td>${amount(p.elo)}</td><td>${amount(p.ratedGames)}</td><td>${amount(p.wins)}</td></tr>`).join('')}</tbody></table></div>${players.length?'':'<p class="account-empty">No players on the ladder yet. Create an account and play your first ranked game.</p>'}`;
+    if(view==='history')return `<p class="account-intro">Your completed ranked rounds. Casual games do not change Elo.</p><div class="account-history">${matches.map(renderMatch).join('')||'<p class="account-empty">No ranked results yet. Your first result will appear here.</p>'}</div>`;
+    if(view==='admin'&&user?.role==='admin')return `<p class="account-intro">Manage player access, create private reset links, and record rating corrections. First and last names are private.</p><div class="account-admin-users">${users.map(u=>`<button class="account-admin-person ${selectedUser?.id===u.id?'selected':''}" data-manage-account="${esc(u.id)}"><span><strong>${esc(u.nickname)}</strong><small>${esc(u.email)}${u.firstName||u.lastName?' · '+esc([u.firstName,u.lastName].filter(Boolean).join(' ')):''}</small></span><span>${amount(u.elo)} Elo${u.suspended?' · Suspended':u.role==='admin'?' · Admin':''}</span></button>`).join('')}</div>${selectedUser?adminDetail():''}`;
+    return '<p class="account-empty">Sign in to view your account.</p>';
+  }
+  function renderMatch(m) {
+    const place=m.place??m.placement??m.result?.place??m.results?.find(p=>p.accountId===user?.id)?.place;
+    const change=m.change??m.delta??m.result?.change??m.results?.find(p=>p.accountId===user?.id)?.change??0;
+    const rated=m.status!=='void';
+    const opponents=m.players||m.opponents||m.results||m.participants||[];
+    return `<article class="account-match"><div><strong>${rated?'Place '+esc(place??'—'):'Unrated round'}</strong><small>${esc(date(m.finishedAt||m.finished||m.created||m.createdAt))}${m.room?' · Table '+esc(m.room):''}</small></div><span class="account-match-change ${amount(change)>0?'positive':amount(change)<0?'negative':''}">${rated?sign(change)+' Elo':'No change'}</span>${opponents.length?`<p>${opponents.map(p=>esc(typeof p==='string'?p:p.nickname||p.name||'Player')).join(' · ')}</p>`:''}${!rated?`<p>${esc(m.voidReason||m.reason||'The round was voided; ratings stayed unchanged.')}</p>`:''}</article>`;
+  }
+  function adminDetail(){return `<section class="account-admin-detail"><h3>${esc(selectedUser.nickname)}</h3><div class="account-admin-actions"><button class="secondary" id="account-admin-reset" ${selectedUser.id===user.id?'disabled':''}>Create password-reset link</button><button class="secondary" id="account-admin-suspend" ${selectedUser.id===user.id||selectedUser.role==='admin'?'disabled':''}>${selectedUser.suspended?'Restore access':'Suspend account'}</button></div>${resetLink?`<label class="account-field">Private reset link<input readonly id="account-reset-link" value="${esc(resetLink)}"></label><button class="text-button" id="account-copy-reset">Copy link</button><p class="account-help">Share this privately with this player. It expires in 15 minutes and can be used once.</p>`:''}<form data-account-form="admin_correct"><h4>Correct a rating</h4>${field('New Elo','newRating',{type:'number',required:true,value:selectedUser.elo,max:10})}${field('Reason for the correction','reason',{required:true,max:300})}${submit('Record rating correction')}</form></section>`;}
+  function render(){
+    content.innerHTML=`<div class="dialog-heading"><div><div class="eyebrow">THE TROIKA CLUB</div><h2 id="account-title">${view==='reset'?'Reset password':view==='register'&&claimToken?'Owner setup':view==='ladder'?'Rankings':view==='admin'?'Admin controls':'Your clubhouse'}</h2></div><button class="icon-button" type="button" id="account-close" aria-label="Close account">×</button></div>${tabs()}<p id="account-message" class="account-message ${error?'account-error':''}" role="status" ${message?'':'hidden'}>${esc(message)}</p>${body()}`;
+  }
+  async function loadView(next){
+    if(pending)return;view=next;message='';error=false;render();
+    if(next==='ladder'||next==='history'||next==='admin'){
+      pending=true;status('Loading…');
+      try{
+        if(next==='ladder')players=(await request('leaderboard',{},'/api/ladder')).players||[];
+        if(next==='history')matches=(await request('history',{},'/api/ladder')).matches||[];
+        if(next==='admin'){users=(await request('admin_users')).users||[];selectedUser=users.find(u=>u.id===selectedUser?.id)||null;}
+        message='';render();
+      }catch(e){status(e.message,true);}finally{pending=false;}
+    }
+  }
+  function open(next){loadView(next);if(!dialog.open)dialog.showModal();}
+  async function formSubmit(form){
+    if(pending||!form.reportValidity())return;
+    const action=form.dataset.accountForm,data=Object.fromEntries(new FormData(form));pending=true;
+    const controls=[...form.querySelectorAll('button,input')];controls.forEach(el=>el.disabled=true);status('');
+    try{
+      if(action==='register'&&claimToken)data.claimToken=claimToken;
+      if(action==='reset')data.resetToken=resetToken;
+      if(action==='admin_correct'){data.userId=selectedUser.id;data.newRating=Number(data.newRating);}
+      const result=await request(action,data,action==='admin_correct'?'/api/ladder':'/api/account');
+      if(action==='forgot'){status(result.message||'Ask the table administrator for a private password-reset link.');return;}
+      if(action==='admin_correct'){
+        users=(await request('admin_users')).users||[];selectedUser=users.find(u=>u.id===selectedUser.id)||null;const updatedSelf=users.find(u=>u.id===user.id);if(updatedSelf)announce(updatedSelf);message='Rating correction recorded.';render();return;
+      }
+      if(action==='register')claimToken='';if(action==='reset')resetToken='';
+      if(Object.hasOwn(result,'user'))announce(result.user);else await refresh();
+      view=user?'profile':'login';message=action==='profile'?'Profile saved.':action==='password'||action==='reset'?'Password updated.':action==='register'?'Welcome to the club.':'You’re signed in.';error=false;render();
+    }catch(e){status(e.message,true);}finally{pending=false;controls.forEach(el=>el.disabled=false);}
+  }
+  document.addEventListener('submit',event=>{const form=event.target.closest?.('#account-dialog form[data-account-form]');if(form){event.preventDefault();formSubmit(form);}});
+  document.addEventListener('click',async event=>{
+    const button=event.target.closest?.('button');if(!button)return;
+    if(button.id==='account-button'){open(user?'profile':claimToken?'register':resetToken?'reset':'login');return;}
+    if(button.id==='ladder-button'){open('ladder');return;}
+    if(button.id==='account-close'){dialog.close();return;}
+    if(!dialog.contains(button)||pending)return;
+    if(button.dataset.accountView){await loadView(button.dataset.accountView);return;}
+    if(button.dataset.manageAccount){selectedUser=users.find(u=>u.id===button.dataset.manageAccount);resetLink='';render();return;}
+    if(button.id==='account-copy-reset'){
+      try{await navigator.clipboard.writeText(resetLink);status('Private reset link copied.');}catch{$('#account-reset-link').select();status('Select and copy the private link above.');}return;
+    }
+    if(button.id==='account-logout'){
+      pending=true;try{await request('logout');announce(null);view='login';message='You’re signed out.';render();}catch(e){status(e.message,true);}finally{pending=false;}return;
+    }
+    if(button.id==='account-admin-reset'||button.id==='account-admin-suspend'){
+      pending=true;
+      try{
+        if(button.id==='account-admin-reset'){
+          const result=await request('admin_reset',{userId:selectedUser.id});const url=new URL(location.href);url.hash='reset='+encodeURIComponent(result.resetToken);url.searchParams.delete('room');resetLink=url.toString();message='Private reset link created. Copy it and share it with this player.';
+        }else{
+          await request('admin_suspend',{userId:selectedUser.id,suspended:!selectedUser.suspended});users=(await request('admin_users')).users||[];selectedUser=users.find(u=>u.id===selectedUser.id)||null;message='Account access updated.';
+        }
+        error=false;render();
+      }catch(e){status(e.message,true);}finally{pending=false;}
+    }
+  });
+  window.TroikaAccounts={user:()=>user,refresh};
+  if(!cloud){if($('#account-button'))$('#account-button').hidden=true;if($('#ladder-button'))$('#ladder-button').hidden=true;return;}
+  if($('#account-button'))$('#account-button').hidden=false;if($('#ladder-button'))$('#ladder-button').hidden=false;
+  const fragment=new URLSearchParams(location.hash.slice(1));claimToken=fragment.get('owner-setup')||'';resetToken=fragment.get('reset')||'';
+  if(claimToken||resetToken){const clean=new URL(location.href);clean.hash='';history.replaceState(null,'',clean);view=claimToken?'register':'reset';render();dialog.showModal();}
+  refresh().catch(()=>{if($('#account-button'))$('#account-button').title='Account service unavailable. Try signing in again.';});
+})();

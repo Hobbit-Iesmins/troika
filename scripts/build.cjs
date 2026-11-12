@@ -9,7 +9,7 @@ fs.mkdirSync(output, {recursive:true});
 let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 if (!html.includes('<meta name="troika-api" content="api.php">')) throw new Error('Missing source API configuration.');
 html = html.replace('<meta name="troika-api" content="api.php">', '<meta name="troika-api" content="/api/game">');
-html = html.replaceAll('LOCAL PLAY', 'ONLINE PLAY').replace('Local network · No accounts', 'Online table · No accounts');
+html = html.replaceAll('LOCAL PLAY', 'ONLINE PLAY').replace('Local network · No accounts', 'Online table · Casual or ranked');
 fs.writeFileSync(path.join(output, 'index.html'), html);
 fs.cpSync(path.join(root, 'assets'), path.join(output, 'assets'), {recursive:true});
 // Include the illustrated guide when present; normal local source downloads still work without it.
