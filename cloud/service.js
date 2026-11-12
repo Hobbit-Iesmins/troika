@@ -136,9 +136,10 @@ async function tk_dispatch(pool, request, context = {}) {
   try { client = await pool.connect(); } catch (error) { throw storageError(error); }
   let transaction = false;
   try {
-    await query(client, 'BEGIN'); transaction = true;
-    await query(client, "SET LOCAL lock_timeout = '5000ms'");
-    await query(client, "SET LOCAL statement_timeout = '10000ms'");
+    // Keep setup in one network round trip. A later SET can fail after BEGIN,
+    // so arm rollback before sending the batch rather than after it succeeds.
+    transaction = true;
+    await query(client, "BEGIN; SET LOCAL lock_timeout = '5000ms'; SET LOCAL statement_timeout = '10000ms'");
     const account=await A.authenticate(client,context.cookie);
     if (action === 'create') {
       E.tk_require(request.ranked===undefined||typeof request.ranked==='boolean','Choose casual or ranked play.');

@@ -24,6 +24,7 @@ function browser(handler,url='https://troika.example.test/'){
   async choose(s,value){const el=w.document.querySelector(s);el.value=String(value);el.dispatchEvent(new w.Event('change',{bubbles:true}));await settle();},
   async submit(){w.document.querySelector('#entry-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await settle();},
   async poll(){const found=[...timers.entries()].find(([,t])=>t.ms===1000);assert.ok(found,'poll scheduled');timers.delete(found[0]);await found[1].fn();await settle();},
+  scheduledPolls(){return [...timers.values()].filter(t=>t.ms===1000).length;},
   async double(s){const card=w.document.querySelector(s);assert.ok(card,s);card.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));assert.equal(w.document.querySelector(s),card);card.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:2}));card.dispatchEvent(new w.MouseEvent('dblclick',{bubbles:true,detail:2}));await settle();},
   close(){w.close();},settle};
 }
@@ -65,11 +66,61 @@ test('pile history is visible on hover, survives polling, and supports focus, to
   enter();
   page.w.document.dispatchEvent(new page.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(style('#pile-history').display,'none');
   assert.equal(page.w.document.body.dataset.yourTurn,'true');assert.ok(page.$('#turn-banner').textContent.startsWith('YOUR TURN'));
-  assert.ok(style('#hand-panel').animation.includes('your-turn-pulse'));assert.equal(style('#hand-panel .hand-heading>span').backgroundColor,'rgb(139, 52, 55)');
+  assert.ok(!style('#hand-panel').animation.includes('your-turn-pulse'),'the large hand panel does not animate a blurred shadow');assert.equal(style('#hand-panel .hand-heading>span').backgroundColor,'rgb(139, 52, 55)');
   g.paused=true;E.tk_touch(g,'Paused','pause');await page.poll();assert.equal(page.w.document.body.dataset.yourTurn,'false');assert.ok(!style('#hand-panel').animation.includes('your-turn-pulse'));
   g.paused=false;g.turnId=g.players[1].id;E.tk_touch(g,'Next turn','test');await page.poll();assert.equal(page.w.document.body.dataset.yourTurn,'false');
   assert.equal(page.errors.length,0);
  }finally{page.close();}
+});
+test('idle polls preserve the DOM, and live updates preserve card focus, scroll and physical identities',async()=>{
+ const {fixture,card}=require('./fixtures.cjs'),g=fixture(),p=g.players[0],id=p.id;
+ g.players[1].bot=false;g.players[1].lastSeen=E.tk_now();
+ g.openingRank=null;g.pile=[];p.hand=[card(7,'S'),card(7,'H'),card(6,'C'),...Array.from({length:37},()=>card(4,'D'))];
+ let offline=false,avatarVersion='a'.repeat(16);
+ const handler=async(req,res)=>{if(offline)throw new Error('Temporary test outage');const state=E.tk_view(g,id);state.players[0].avatar={kind:'image',url:'/api/avatar?user='+('a'.repeat(24))+'&v='+avatarVersion};res.end(JSON.stringify({room:g.room,token:'test-seat-token',state}));};
+ const page=browser(handler);
+ try{
+  page.input('#nickname','Render tester');await page.submit();
+  const first=p.hand[0],seven=page.$(`[data-card="${first.id}"]`),cards=page.$('.hand-cards'),avatar=page.$('.seat.active .seat-avatar'),player=page.$('#players-panel .player-list-item');
+  const image=player.querySelector('.avatar-image');image.dispatchEvent(new page.w.Event('error'));assert.equal(image.hidden,true);
+  await page.click(`[data-card="${first.id}"]`);seven.focus();cards.scrollLeft=240;
+  let changes=0;const observer=new page.w.MutationObserver(rows=>changes+=rows.length);
+  observer.observe(page.w.document.body,{childList:true,attributes:true,characterData:true,subtree:true});
+  for(let i=0;i<5;i++)await page.poll();
+  observer.disconnect();assert.equal(changes,0,'unchanged heartbeat polls do not mutate the page');
+  const peer=g.players[1],peerRow=page.$(`[data-player-id="${peer.id}"]`);peer.lastSeen=E.tk_now()-40;await page.poll();
+  assert.ok(peerRow.textContent.includes('Reconnecting'),'same-version responses still update connection status');assert.ok(page.$(`[data-replace-bot="${peer.seat}"]`));
+  peer.lastSeen=E.tk_now();await page.poll();assert.ok(peerRow.textContent.includes('Connected'));assert.equal(page.$(`[data-replace-bot="${peer.seat}"]`),null);
+  E.tk_touch(g,'Unrelated profile update','profile');await page.poll();
+  assert.equal(page.$(`[data-card="${first.id}"]`),seven);assert.equal(page.$('.hand-cards'),cards);assert.equal(cards.scrollLeft,240);assert.equal(page.w.document.activeElement,seven);
+  assert.equal(seven.getAttribute('aria-pressed'),'true');assert.equal(page.$('#play-matching-button').textContent,'Play 2 × 7');assert.equal(page.$('.seat.active .seat-avatar'),avatar);assert.equal(page.$('#players-panel .player-list-item'),player);assert.equal(image.hidden,true,'an unchanged failed avatar keeps its initial fallback');
+  avatarVersion='b'.repeat(16);E.tk_touch(g,'New avatar','profile');await page.poll();assert.equal(player.querySelector('.avatar-image'),image);assert.equal(image.hidden,false,'a new avatar URL may load again');
+  // A changed pile updates legality without redealing the entire held hand.
+  g.pile=[card(14,'S')];E.tk_touch(g,'Opponent plays an ace','play');await page.poll();
+  assert.equal(page.$(`[data-card="${first.id}"]`),seven);assert.ok(seven.classList.contains('unplayable'));assert.equal(page.$('#play-matching-button').hidden,true);
+  const six=page.$(`[data-card="${p.hand[2].id}"]`);assert.ok(six.classList.contains('playable'));
+  g.turnId=g.players[1].id;E.tk_touch(g,'Turn passed','play');await page.poll();assert.equal(seven.disabled,true);assert.equal(seven.getAttribute('aria-pressed'),'false');assert.equal(page.$('#play-button').disabled,true);
+  g.turnId=id;g.pile=[];g.paused=true;E.tk_touch(g,'Paused','pause');await page.poll();assert.ok(page.$('#turn-banner').textContent.includes('paused'));assert.equal(seven.disabled,true);
+  g.paused=false;E.tk_touch(g,'Resumed','pause');await page.poll();assert.equal(seven.disabled,false);assert.ok(page.$('#turn-banner').textContent.startsWith('YOUR TURN'));
+  // Removing a physical card reuses and reorders the survivors, including focus.
+  six.focus();p.hand=p.hand.slice(1);E.tk_touch(g,'A held card was played','play');await page.poll();assert.equal(page.$(`[data-card="${first.id}"]`),null);assert.equal(page.$(`[data-card="${p.hand[1].id}"]`),six);assert.equal(page.w.document.activeElement,six);
+  offline=true;await page.poll();assert.ok(page.$('#turn-banner').textContent.includes('Connection lost'));
+  offline=false;await page.poll();assert.ok(page.$('#turn-banner').textContent.startsWith('YOUR TURN'),'same-version reconnect restores the real turn banner');
+  assert.equal(page.errors.length,0);
+ }finally{page.close();}
+});
+test('returning to a tab during an in-flight request keeps exactly one polling loop',async()=>{
+ const {fixture}=require('./fixtures.cjs'),g=fixture();let release,delay=false,waiting=false;
+ const handler=async(req,res)=>{if(delay){waiting=true;await new Promise(resolve=>release=resolve);}res.end(JSON.stringify({room:g.room,token:'test-seat-token',state:E.tk_view(g,g.players[0].id)}));};
+ const page=browser(handler);
+ try{
+  page.input('#nickname','Tab switch tester');await page.submit();delay=true;
+  const pending=page.poll();await waitFor(()=>waiting);
+  for(let i=0;i<4;i++)page.w.document.dispatchEvent(new page.w.Event('visibilitychange'));
+  delay=false;release();await pending;
+  assert.equal(page.scheduledPolls(),1,'tab visibility events cannot create duplicate polling timers');
+  const before=page.calls.length;await page.poll();assert.equal(page.calls.length,before+1);assert.equal(page.scheduledPolls(),1);
+ }finally{release?.();page.close();}
 });
 test('cloud browser controls use the real Node handler and PostgreSQL for multiplayer, jumps, pause, replay and scores',{skip:!connectionString},async()=>{
  const schema='troika_ui_'+randomBytes(8).toString('hex'),admin=new Pool({connectionString,max:1});let pool,host,guest,lobbyGuest;
@@ -86,7 +137,7 @@ test('cloud browser controls use the real Node handler and PostgreSQL for multip
   const king=hp.hand[0].id;assert.ok(!host.$(`#hand-panel [data-card="${king}"]`).disabled);await host.click(`#hand-panel [data-card="${king}"]`);assert.ok(host.$('#play-button').textContent.includes('Jump in'));await host.click('#play-button');g=await load();assert.equal(g.turnId,hp.id);assert.equal(g.pile.length,0);assert.equal(g.hole.length,4);assert.equal(g.lastMove.type,'jump');
   await guest.poll();const guestView=guest.responses.at(-1).state;assert.equal(guestView.players.find(p=>p.id===hp.id).hand,null);assert.ok(!JSON.stringify(guestView).includes(hp.tokenHash));
   await host.click('#pile-inspect');assert.equal(host.$$('#pile-history .history-card').length,1);assert.ok(host.$('#pile-history').textContent.includes('K'));await host.click('#close-pile-history');
-  const beforeReplay=host.calls.length;await host.click('#replay-button');assert.ok(host.$('#replay-dialog').open);assert.ok(host.$('#replay-content').textContent.includes('4 sent to the hole'));await host.click('#replay-again');assert.equal(host.calls.length,beforeReplay);await host.click('.close-replay-dialog');
+  const beforeReplay=host.calls.length;await host.click('#replay-button');assert.ok(host.$('#replay-dialog').open);assert.ok(host.$('#replay-content').textContent.includes('4 sent to the hole'));const replayCards=host.$('.replay-cards');await host.click('#replay-again');assert.notEqual(host.$('.replay-cards'),replayCards,'replaying the same move restarts its entry and burn animations');assert.equal(host.calls.length,beforeReplay);await host.click('.close-replay-dialog');
   await host.click('#pause-button');assert.equal((await load()).paused,true);assert.ok(host.$$('#hand-panel [data-card]').every(el=>el.disabled));await guest.poll();assert.equal(guest.$('#pause-button'),null);assert.equal(guest.w.document.body.dataset.paused,'true');await guest.click('#scoreboard-button');assert.ok(guest.$('#scoreboard-dialog').open);await guest.click('.close-scoreboard-dialog');await host.click('#pause-button');assert.equal((await load()).paused,false);
   const ace=hp.hand[1].id;await host.double(`#hand-panel [data-card="${ace}"]`);assert.deepEqual(host.calls.filter(c=>c.action==='play').at(-1).cards,[ace]);
   g=await load();g.deck=[];g.pile=[];g.openingRank=null;g.turnId=hp.id;const matchingPlayer=g.players.find(p=>p.id===hp.id);matchingPlayer.hand=[card(7,'C'),card(7,'H'),card(7,'S'),card(13,'D')];await save(g);await host.poll();
