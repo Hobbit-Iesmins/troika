@@ -32,6 +32,14 @@
   const localhost = () => ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
   const initial = name => Array.from(name || '?')[0].toUpperCase();
   const ordinal = n => n + ({1:'st',2:'nd',3:'rd'}[n] || 'th');
+  const avatarColor=p=>p.avatar?.kind==='initial'&&['gold','coral','mint','sky','violet'].includes(p.avatar.color)?' avatar-color-'+p.avatar.color:'';
+  function avatarContent(p){
+    const a=p.avatar,text=a?.kind==='initial'&&typeof a.text==='string'&&Array.from(a.text).length<=2?a.text||initial(p.name):initial(p.name);
+    const src=a?.kind==='image'?(a.url||a.dataUrl||''):'';
+    const safe=/^\/api\/avatar\?user=[a-f0-9]{24}&v=[a-f0-9]{16}$/.test(src)||/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(src)&&src.length<=24000;
+    return `<span class="avatar-initial">${esc(text)}</span>${safe?`<img class="avatar-image" src="${esc(src)}" alt="" decoding="async">`:''}`;
+  }
+
   function toast(message, error = false) {
     clearTimeout(toastTimer); const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.hidden = false;
     toastTimer = setTimeout(() => {el.hidden=true;}, error ? 6000 : 3500);
@@ -185,13 +193,13 @@
         if(p.up.length) reserves=p.up.map(c=>`<span class="reserve-stack">${p.downCount?backHTML():''}${cardHTML(c,{small:true,button:self&&p.phase==='up'&&(myTurn()||canJump(c.id,'up')),source:'up',selectedCard:selected.includes(c.id)})}</span>`).join('');
         else reserves=(p.downSlots || []).map(id=>backHTML(id,self&&p.phase==='down'&&myTurn(),selected.includes(id))).join('');
       }
-      return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30&&!game.ranked?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
+      return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}>${self&&accountUser()?`<button type="button" class="seat-avatar${avatarColor(p)}" data-avatar-edit aria-label="Customize your avatar">${avatarContent(p)}</button>`:`<div class="seat-avatar${avatarColor(p)}" role="img" aria-label="${esc(p.name)}">${avatarContent(p)}</div>`}<div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}"><span class="seat-name-text">${esc(p.name)}</span>${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30&&!game.ranked?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
     }).join('');
     // Keep the active ring running through heartbeat polls and unrelated updates.
     if(seatsMarkup!==markup){$('#seats').innerHTML=markup;seatsMarkup=markup;}
   }
   function renderPlayers() {
-    $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/${capacity()}</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
+    $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/${capacity()}</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar${avatarColor(p)}" aria-hidden="true">${avatarContent(p)}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');
   }
   function renderGame() {
     document.body.dataset.gameStatus=game.status;document.body.dataset.paused=String(Boolean(game.paused));document.body.dataset.yourTurn=String(myTurn());
@@ -215,7 +223,8 @@
       const name=rankName(card.rank)+' of '+({S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[card.suit]);
       return `<span class="event-card ${['H','D'].includes(card.suit)?'red':''}" role="listitem" aria-label="${name}"><span class="event-rank">${rankName(card.rank)}</span><span class="event-suit" aria-hidden="true">${suits[card.suit]}</span></span>`;
     }).join('');
-    return `<div class="event ${esc(event.type)}"><div class="event-text">${esc(event.text)}</div>${badges?`<div class="event-cards" role="list" aria-label="Cards played or revealed">${badges}</div>`:''}</div>`;
+    const owner=event.playerId?(event.playerId===game.youId?'own':'opponent'):'system';
+    return `<div class="event ${esc(event.type)} event-${owner}"><span class="event-owner-label">${owner==='own'?'YOU':owner==='opponent'?'PLAYER':'TABLE'}</span><div class="event-text">${esc(event.text)}</div>${badges?`<div class="event-cards" role="list" aria-label="Cards played or revealed">${badges}</div>`:''}</div>`;
   }
   function renderCenter() {
     const historyFocus=$('.pile-history-wrap')?.contains(document.activeElement)?document.activeElement.id:null;
@@ -230,7 +239,7 @@
       $('#turn-banner').textContent=host()?'Same seats, fresh cards? Start a rematch.':'Waiting for the host to set up a rematch.';return;
     }
     const top=game.pile.at(-1), active=game.players.find(p=>p.id===game.turnId);
-    $('#table-center').innerHTML=`<div class="table-status">${game.openingRank!==null?'LOWEST CARD OPENS · '+rankName(game.openingRank):!top?'OPEN TABLE · ANY RANK':top.rank===6?'RESET · ANY RANK':rankName(top.rank)+' OR HIGHER · 6 OR 10'}</div><div class="game-piles"><div class="pile-group"><div>${game.deckCount?`<div class="deck-stack">${backHTML()}</div>`:'<div class="pile-empty">∅</div>'}</div><span>DECK · ${game.deckCount}</span></div><div class="pile-group pile-history-wrap ${pileHistoryOpen?'history-open':''}"><div><button id="pile-inspect" type="button" aria-label="Inspect the last 10 played cards" aria-controls="pile-history" aria-expanded="${pileHistoryOpen}">${game.pile.length?game.pile.slice(-3).map(c=>`<span class="pile-card">${cardHTML(c)}</span>`).join(''):'<span class="pile-empty">♧</span>'}</button></div><span>PILE · ${game.pile.length}</span>${historyHTML()}</div><div class="pile-group hole-group"><div class="hole">✧</div><span>HOLE · ${game.holeCount}</span></div></div>`;
+    $('#table-center').innerHTML=`<div class="table-status">${game.openingRank!==null?'LOWEST CARD OPENS · '+rankName(game.openingRank):!top?'OPEN TABLE · ANY RANK':top.rank===6?'RESET · ANY RANK':rankName(top.rank)+' OR HIGHER · 6 OR 10'}</div><div class="game-piles"><div class="pile-group"><div>${game.deckCount?`<div class="deck-stack">${backHTML()}</div>`:'<div class="pile-empty">∅</div>'}</div><span>DECK · ${game.deckCount}</span></div><div class="pile-group pile-history-wrap ${pileHistoryOpen?'history-open':''}"><div><button id="pile-inspect" type="button" aria-label="Inspect recent plays and cards still in the pile" aria-controls="pile-history" aria-expanded="${pileHistoryOpen}">${game.pile.length?game.pile.slice(-3).map(c=>`<span class="pile-card">${cardHTML(c)}</span>`).join(''):'<span class="pile-empty">♧</span>'}</button></div><span>PILE · ${game.pile.length}</span>${historyHTML()}</div><div class="pile-group hole-group"><div class="hole">✧</div><span>HOLE · ${game.holeCount}</span></div></div>`;
     if(historyFocus)$('#'+historyFocus)?.focus({preventScroll:true});
     updatePileHistory();
     $('#turn-banner').innerHTML=myTurn()?`<strong>YOUR TURN</strong> · ${game.openingRank!==null?'Open with '+rankName(game.openingRank)+', the lowest hand card.':'Your move. Make it a good one.'}`:game.openingRank!==null?`<span style="color:var(--gold)">${esc(active?.name)} opens with ${rankName(game.openingRank)}, the lowest hand card.</span>`:`Waiting for ${esc(active?.name)}${active?.bot?' <span class="loading-dots">···</span>':''}`;
@@ -271,8 +280,10 @@
     return (Array.isArray(cards)?cards:[]).filter(c=>c&&Number.isInteger(c.rank)&&c.rank>=2&&c.rank<=14&&Object.hasOwn(suits,c.suit));
   }
   function historyHTML() {
-    const cards=publicFaces(game.recentCards).slice(-10);
-    return `<div id="pile-history" class="pile-history" role="region" aria-label="Last 10 played cards"><div class="pile-history-header"><strong>Last ${cards.length} played cards</strong><button class="history-close" type="button" id="close-pile-history" aria-label="Close card history">×</button></div>${cards.length?`<div class="history-cards" role="list">${cards.map(c=>`<span class="history-card event-card ${['H','D'].includes(c.suit)?'red':''}" role="listitem" aria-label="${rankName(c.rank)} of ${{S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[c.suit]}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')}</div><small class="history-note">Oldest → newest · includes burned cards</small>`:'<p class="history-empty">No cards have been played this round yet.</p>'}</div>`;
+    const cards=publicFaces(game.recentCards).slice(-10),pile=publicFaces(game.pile),top=pile.at(-1),groups=new Map();
+    for(const c of pile){if(!groups.has(c.rank))groups.set(c.rank,new Map());const suitsForRank=groups.get(c.rank);suitsForRank.set(c.suit,(suitsForRank.get(c.suit)||0)+1);}
+    const current=[...groups].sort(([a],[b])=>a-b).map(([rank,counts])=>`<div class="pile-rank-group" data-rank="${rank}"><strong>${rankName(rank)} <small>×${[...counts.values()].reduce((a,b)=>a+b,0)}</small></strong><div class="pile-suit-chips">${Object.keys(suits).filter(suit=>counts.has(suit)).map(suit=>`<span class="event-card ${['H','D'].includes(suit)?'red':''} ${top?.rank===rank&&top.suit===suit?'pile-card-top':''}" aria-label="${rankName(rank)} of ${{S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[suit]}${counts.get(suit)>1?' · '+counts.get(suit)+' copies':''}${top?.rank===rank&&top.suit===suit?' · top card':''}">${rankName(rank)} ${suits[suit]}${counts.get(suit)>1?`<small class="pile-copy-count">×${counts.get(suit)}</small>`:''}</span>`).join('')}</div></div>`).join('');
+    return `<div id="pile-history" class="pile-history" role="region" aria-label="Recent plays and current pile"><div class="pile-history-header"><strong>Pile inspector</strong><button class="history-close" type="button" id="close-pile-history" aria-label="Close card history">×</button></div><div class="pile-inspector-grid"><section class="history-section" id="pile-recent-section" tabindex="0" aria-label="Recent played cards"><h4>Last ${cards.length} played cards</h4>${cards.length?`<div class="history-cards" role="list">${cards.map(c=>`<span class="history-card event-card ${['H','D'].includes(c.suit)?'red':''}" role="listitem" aria-label="${rankName(c.rank)} of ${{S:'spades',H:'hearts',D:'diamonds',C:'clubs'}[c.suit]}">${rankName(c.rank)} ${suits[c.suit]}</span>`).join('')}</div><small class="history-note">Oldest → newest · includes burned cards</small>`:'<p class="history-empty">No plays yet this round.</p>'}</section><section class="current-pile-section" id="pile-current-section" tabindex="0" aria-label="Cards currently in the pile"><h4>Still in the pile · ${pile.length}</h4>${top?`<p class="pile-current-top">Top card: <strong>${rankName(top.rank)} ${suits[top.suit]}</strong></p><div class="current-pile-cards">${current}</div><small class="history-note">Grouped by rank · glowing chip marks the top</small>`:'<p class="history-empty">Empty pile. Nothing to pick up.</p>'}</section></div></div>`;
   }
   function updatePileHistory() {
     const wrap=$('.pile-history-wrap');if(!wrap)return;
@@ -499,6 +510,7 @@
       if(game?.status==='finished'&&publicFaces(game.ownBlindCards).length){ownBlindRevealed=!ownBlindRevealed;renderHand();$('#reveal-blind-button').focus({preventScroll:true});}
       return;
     }
+    if(target.hasAttribute('data-avatar-edit')){$('#account-button')?.click();return;}
     if(target.id==='players-button'){if(host()){pendingKick=null;renderManagePlayers();$('#players-dialog').showModal();}return;}
     if(target.classList.contains('close-players-dialog')){$('#players-dialog').close();pendingKick=null;return;}
     if(target.dataset.kickPlayer){if(host()){pendingKick=target.dataset.kickPlayer;renderManagePlayers();$('#confirm-kick')?.focus();}return;}
@@ -558,6 +570,7 @@
       if(game?.ranked&&game.status==='playing'&&!me()?.finish)$('#leave-dialog').showModal();else await leaveTable();return;
     }
   });
+  document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement&&e.target.classList.contains('avatar-image'))e.target.hidden=true;},true);
   document.addEventListener('dblclick',e=>{
     const card=e.target.closest('#hand-panel button[data-card][data-source="hand"]');
     if(!card || card.disabled)return;

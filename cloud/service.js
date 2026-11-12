@@ -89,6 +89,13 @@ async function save(client, game) {
 }
 function view(game,id) {
   const state=E.tk_view(game,id);
+  for(const player of state.players){
+    const source=game.players.find(p=>p.id===player.id);
+    if(player.avatar?.kind==='image'&&source?.accountId){
+      const version=createHash('sha256').update(player.avatar.dataUrl).digest('hex').slice(0,16);
+      player.avatar={kind:'image',url:'/api/avatar?user='+encodeURIComponent(source.accountId)+'&v='+version};
+    }
+  }
   if(game.ranked){state.ranked=true;state.rankedAccountId=game.players.find(p=>p.id===id)?.accountId;state.ranking=game.ranking?{status:game.ranking.status,reason:game.ranking.reason,results:game.ranking.results}:null;}
   return state;
 }
@@ -143,7 +150,7 @@ async function tk_dispatch(pool, request, context = {}) {
       const settings = E.tk_settings(settingsInput);
       const name = tk_nickname(account?.nickname||request.nickname), seat = tk_seat(request.seat ?? 0, settings.maxPlayers);
       const token = newToken(), player = E.tk_new_player(name, seat, false, tokenHash(token));
-      if(account)player.accountId=account.id;
+      if(account){player.accountId=account.id;if(account.avatar)player.avatar=structuredClone(account.avatar);}
       let game;
       for (let attempt = 0; attempt < 20; attempt++) {
         game = E.tk_new_game(roomCode(), player, settings);
@@ -177,7 +184,7 @@ async function tk_dispatch(pool, request, context = {}) {
       tk_free_seat(game, seat);
       E.tk_require(!game.players.some(player => tk_same_name(player.name, name)), 'That nickname is already seated here.');
       const token = newToken(), player = E.tk_new_player(name, seat, false, tokenHash(token));
-      if(account)player.accountId=account.id;
+      if(account){player.accountId=account.id;if(account.avatar)player.avatar=structuredClone(account.avatar);}
       if (game.hostId === null) { game.hostId = player.id; player.ready = true; }
       game.players.push(player);
       E.tk_touch(game, name + ' took seat ' + (seat + 1) + '.', 'lobby', player.id);
@@ -198,6 +205,10 @@ async function tk_dispatch(pool, request, context = {}) {
       return {left:true,abandoned:true,rankedStatus};
     }
     game.players[index].lastSeen = E.tk_now();
+    if(account&&game.players[index].accountId===account.id&&JSON.stringify(E.tk_avatar(game.players[index].avatar))!==JSON.stringify(account.avatar)){
+      if(account.avatar)game.players[index].avatar=structuredClone(account.avatar);else delete game.players[index].avatar;
+      E.tk_touch(game,game.players[index].name+' updated their avatar.','profile',id);
+    }
     if(game.ranked)game.players[index].rankedPauseCredit=0;
     switch (action) {
       case 'state': break;

@@ -443,3 +443,81 @@ body[data-game-status="playing"][data-paused="false"] .expanded-table .seat.acti
 .hand-actions.has-matches .primary,.hand-actions.has-matches .secondary{min-height:30px;padding:6px 7px}
 .hand-actions .matching-play-button{border-color:var(--gold);color:var(--gold);font-weight:bold;white-space:nowrap}
 .hand-actions .matching-play-button:hover:not(:disabled){border-color:var(--gold-bright);color:var(--gold-bright)}
+
+/* Table codes use lining figures and equal-width characters in every theme. */
+.room-code{font:700 22px/1.2 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-variant-numeric:lining-nums tabular-nums;font-feature-settings:"lnum" 1,"tnum" 1;letter-spacing:.18em;white-space:nowrap}
+
+/* Let a full nickname occupy a second line instead of cutting its owner off. */
+.board-wrap:not(.expanded-table) .seat{width:126px}
+.seat .seat-name{max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.25;text-align:center}
+.seat .seat-name-text{white-space:normal;overflow-wrap:anywhere}
+.seat .seat-name .you-label{display:inline-block;vertical-align:baseline;white-space:nowrap}
+.board-wrap:not(.expanded-table) .seat[data-seat="0"]{width:max-content;max-width:210px}
+.board-wrap:not(.expanded-table) .seat[data-seat="0"] .seat-name{max-width:165px;text-align:left}
+.expanded-table .seat .seat-name{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.15;overflow-wrap:anywhere}
+.expanded-table .seat .seat-count{max-width:30px;font-size:7px}
+.player-list-item>div:nth-child(2){flex:1;min-width:0}
+.player-list-item strong{max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.3}
+.player-list-item .ready-check{flex-shrink:0}
+.manage-player-info strong{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+
+/* Crop uploaded pictures inside the circle while keeping its comet ring outside. */
+.seat-avatar,.small-avatar{position:relative;isolation:isolate;padding:0;flex-shrink:0}
+button.seat-avatar{cursor:pointer}
+button.seat-avatar:hover{filter:brightness(1.08)}
+.avatar-initial{position:relative;z-index:0;line-height:1}
+.avatar-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:1;pointer-events:none}
+.avatar-color-gold{--avatar-bg:#d6b67a;--avatar-ink:#20271e}
+.avatar-color-coral{--avatar-bg:#ed9b8c;--avatar-ink:#3d211d}
+.avatar-color-mint{--avatar-bg:#a7d5b8;--avatar-ink:#193d2b}
+.avatar-color-sky{--avatar-bg:#a3cfe9;--avatar-ink:#213849}
+.avatar-color-violet{--avatar-bg:#ccb4e9;--avatar-ink:#38274c}
+.seat-avatar[class*="avatar-color-"],.small-avatar[class*="avatar-color-"],.seat.is-self .seat-avatar[class*="avatar-color-"]{background:var(--avatar-bg);color:var(--avatar-ink)}
+
+/* Separate personal moves from opponents without changing the actual card ink. */
+.event.event-own,.event.event-opponent{border-left:2px solid transparent;border-radius:0 5px 5px 0;padding:7px 7px 9px 10px;margin-bottom:5px}
+.event.event-own{border-left-color:#92cfb3;background:#9dd9bd0a;color:#b2e7ce}
+.event.event-opponent{border-left-color:#d6b67a77;background:#d6b67a08;color:#e1cda4}
+.event.event-own:before,.event.event-opponent:before{display:none}
+.event.event-system{color:var(--muted)}
+.event-owner-label{display:inline-block;font:700 7px/1.3 Arial,Helvetica,sans-serif;letter-spacing:.7px;margin-bottom:3px;padding:2px 4px;border:1px solid currentColor;border-radius:3px;opacity:.85}
+[data-theme="classic"] .event.event-own{border-left-color:#397e62;background:#397e620c;color:#27654b}
+[data-theme="classic"] .event.event-opponent{border-left-color:#9b743b88;background:#9b743b0a;color:#795a2a}
+
+/* Two complementary memories: the recent trail and the cards still on the felt. */
+.pile-group.pile-history-wrap>.pile-history{width:min(460px,calc(100vw - 28px));height:auto;max-width:calc(100vw - 28px);max-height:min(360px,55dvh);overflow:auto;scrollbar-width:thin}
+.pile-history-wrap.history-visible::before,.pile-history-wrap.history-open::before{content:'';position:absolute;left:50%;bottom:100%;transform:translateX(-50%);width:min(460px,calc(100vw - 28px));height:12px;pointer-events:auto}
+.pile-inspector-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+.pile-inspector-grid>section{min-width:0;max-height:min(250px,max(70px,calc(55dvh - 100px)));overflow:auto;scrollbar-width:thin;padding:0 2px 3px 0}
+.pile-inspector-grid>section+section{border-left:1px solid var(--line);padding-left:12px}
+.pile-inspector-grid h4{font-size:9px;line-height:1.4;letter-spacing:.7px;text-transform:uppercase;color:var(--gold);margin:0 0 8px;font-weight:normal}
+.pile-inspector-grid .history-cards{gap:5px}
+.pile-inspector-grid .history-card{font-size:12px;min-height:29px;padding:4px 2px;gap:2px}
+.current-pile-cards{display:flex;flex-direction:column;gap:7px}
+.pile-rank-group{display:flex;align-items:flex-start;gap:7px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+.pile-rank-group:last-child{padding-bottom:0;border-bottom:0}
+.pile-rank-group>strong{min-width:15px;padding-top:5px;color:var(--muted);font:14px/1.1 Georgia,serif;text-align:center}
+.pile-suit-chips{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+.pile-suit-chips .event-card{justify-content:center;gap:3px;font-size:11px;min-height:27px;padding:4px}
+.pile-copy-count{font-size:9px;opacity:.7;margin-left:1px}
+.pile-suit-chips .pile-card-top{border-color:var(--gold-bright);box-shadow:0 0 0 1px var(--gold-bright),0 0 9px #edc98744}
+.current-pile-section .history-empty{font-size:10px;line-height:1.6}
+@media(max-width:759px){
+  .board-wrap:not(.expanded-table) .seat{width:84px}
+  .board-wrap:not(.expanded-table) .seat[data-seat="0"]{max-width:min(210px,65vw)}
+  .board-wrap:not(.expanded-table) .seat[data-seat="0"] .seat-name{max-width:150px}
+  .pile-history-wrap .pile-history{padding:10px}
+}
+@media(max-width:480px){
+  .pile-inspector-grid{grid-template-columns:minmax(0,1fr);gap:10px}
+  .pile-inspector-grid>section{max-height:140px}
+  .pile-inspector-grid>section+section{padding:10px 0 3px;border-left:0;border-top:1px solid var(--line)}
+  .pile-inspector-grid .history-cards{grid-template-columns:repeat(5,minmax(0,1fr))}
+}
+@media(max-width:360px){.board-wrap:not(.expanded-table) .seat{width:72px}.board-wrap:not(.expanded-table) .seat[data-seat="0"] .seat-name{max-width:140px}.room-code{font-size:20px}}
+@media(max-height:520px){.pile-inspector-grid>section{max-height:max(65px,calc(55dvh - 80px))}.pile-inspector-grid h4{margin-bottom:6px}.pile-group.pile-history-wrap>.pile-history{max-height:65dvh}}
+
+.pile-inspector-grid>section:focus-visible{outline:1px solid var(--gold);outline-offset:2px;border-radius:3px}
+.pile-current-top{font-size:10px;line-height:1.5;margin:0 0 9px;color:var(--muted)}
+.pile-current-top strong{color:var(--text);font-weight:normal}
+.pile-rank-group>strong small{display:block;font:9px/1.2 Arial,Helvetica,sans-serif;margin-top:3px}

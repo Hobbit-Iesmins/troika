@@ -2,7 +2,7 @@
 const crypto=require('node:crypto');
 const {promisify}=require('node:util');
 const fs=require('node:fs');const path=require('node:path');
-const {GameError}=require('./engine.js');const {storageError}=require('./database.js');
+const {GameError,tk_avatar}=require('./engine.js');const {storageError}=require('./database.js');
 const C=require('./conduct.js');
 const derive=promisify(crypto.scrypt),initialized=new WeakMap();
 const COOKIE='troika_session',SESSION_DAYS=30;
@@ -12,6 +12,7 @@ const SQL=`CREATE TABLE IF NOT EXISTS troika_accounts (
  role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin')),suspended BOOLEAN NOT NULL DEFAULT false,
  elo INTEGER NOT NULL DEFAULT 500,rated_games INTEGER NOT NULL DEFAULT 0,wins INTEGER NOT NULL DEFAULT 0,last_places INTEGER NOT NULL DEFAULT 0,
  placement_sum INTEGER NOT NULL DEFAULT 0,peak_elo INTEGER NOT NULL DEFAULT 500,created TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+ALTER TABLE troika_accounts ADD COLUMN IF NOT EXISTS avatar JSONB;
 CREATE TABLE IF NOT EXISTS troika_sessions (token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES troika_accounts(id) ON DELETE CASCADE,expires TIMESTAMPTZ NOT NULL);
 CREATE INDEX IF NOT EXISTS troika_sessions_user_idx ON troika_sessions(user_id);
 CREATE TABLE IF NOT EXISTS troika_password_resets (token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES troika_accounts(id) ON DELETE CASCADE,expires TIMESTAMPTZ NOT NULL);
@@ -39,7 +40,7 @@ async function verify(value,stored){
  const parts=String(stored).split('$');if(parts.length!==3||parts[0]!=='scrypt'||!/^[a-f0-9]{32}$/.test(parts[1])||!/^[a-f0-9]{128}$/.test(parts[2]))return false;
  const key=await derive(value,parts[1],64,{N:16384,r:8,p:1,maxmem:64*1024*1024});return crypto.timingSafeEqual(key,Buffer.from(parts[2],'hex'));
 }
-function privateUser(row){return {id:row.id,email:row.email,nickname:row.nickname,firstName:row.first_name,lastName:row.last_name,role:row.role,suspended:row.suspended,elo:row.elo,ratedGames:row.rated_games,wins:row.wins,lastPlaces:row.last_places,placementSum:row.placement_sum,peakElo:row.peak_elo,created:row.created};}
+function privateUser(row){return {id:row.id,email:row.email,nickname:row.nickname,firstName:row.first_name,lastName:row.last_name,role:row.role,suspended:row.suspended,elo:row.elo,ratedGames:row.rated_games,wins:row.wins,lastPlaces:row.last_places,placementSum:row.placement_sum,peakElo:row.peak_elo,created:row.created,avatar:tk_avatar(row.avatar)};}
 function bootstrapConfig(override){
  if(override!==undefined)return override;
  try{const v=JSON.parse(fs.readFileSync(path.join(__dirname,'owner-bootstrap.json'),'utf8'));return /^[a-f0-9]{64}$/.test(v.emailHash)&&/^[a-f0-9]{64}$/.test(v.tokenHash)?v:null;}catch{return null;}
@@ -115,7 +116,9 @@ async function dispatchAccount(pool,request,context={}){
    if(action.startsWith('admin_')){fail(user.role==='admin','Only the administrator can do that.',403);}
    if(action==='profile'){
     const name=text(request.nickname,'nickname',20),first=text(request.firstName,'first name',60,true),last=text(request.lastName,'last name',60,true);
-    const row=(await c.query('UPDATE troika_accounts SET nickname=$2,nickname_key=$3,first_name=$4,last_name=$5 WHERE id=$1 RETURNING *',[user.id,name,normalize(name),first,last])).rows[0];body={user:privateUser(row)};
+    const hasAvatar=Object.hasOwn(request,'avatar'),avatar=hasAvatar?tk_avatar(request.avatar):null;
+    fail(!hasAvatar||request.avatar===null||avatar,'Choose a valid initial badge or a PNG, JPEG, or WebP avatar up to 256 pixels and 24 KB.');
+    const row=(await c.query('UPDATE troika_accounts SET nickname=$2,nickname_key=$3,first_name=$4,last_name=$5,avatar=CASE WHEN $6::boolean THEN $7::jsonb ELSE avatar END WHERE id=$1 RETURNING *',[user.id,name,normalize(name),first,last,hasAvatar,avatar===null?null:JSON.stringify(avatar)])).rows[0];body={user:privateUser(row)};
    }else if(action==='password'){
     const row=(await c.query('SELECT * FROM troika_accounts WHERE id=$1 FOR UPDATE',[user.id])).rows[0];fail(await verify(request.currentPassword,row.password_hash),'Your current password is incorrect.',403);
     const encoded=await passwordHash(request.password);await c.query('UPDATE troika_accounts SET password_hash=$2 WHERE id=$1',[user.id,encoded]);await c.query('DELETE FROM troika_sessions WHERE user_id=$1',[user.id]);await c.query('DELETE FROM troika_password_resets WHERE user_id=$1',[user.id]);cookieValue=await createSession(c,user.id,secure);body={user};

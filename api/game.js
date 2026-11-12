@@ -8,19 +8,19 @@ function respond(res, status, body) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(body));
 }
-function decodeJSON(raw) {
-  if (raw.length > LIMIT) throw new GameError('This request is too large.', 413);
+function decodeJSON(raw,limit=LIMIT) {
+  if (raw.length > limit) throw new GameError('This request is too large.', 413);
   try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw)); }
   catch { throw new GameError('Send valid JSON.'); }
 }
-async function readBody(req) {
+async function readBody(req,limit=LIMIT) {
   const size = req.headers['content-length'];
-  if (size !== undefined && (!/^\d+$/.test(String(size)) || Number(size) > LIMIT)) throw new GameError('This request is too large.', 413);
+  if (size !== undefined && (!/^\d+$/.test(String(size)) || Number(size) > limit)) throw new GameError('This request is too large.', 413);
   let body;
-  if (Buffer.isBuffer(req.body)) body = decodeJSON(req.body);
-  else if (typeof req.body === 'string') body = decodeJSON(Buffer.from(req.body));
+  if (Buffer.isBuffer(req.body)) body = decodeJSON(req.body,limit);
+  else if (typeof req.body === 'string') body = decodeJSON(Buffer.from(req.body),limit);
   else if (req.body !== undefined) {
-    try { if (Buffer.byteLength(JSON.stringify(req.body)) > LIMIT) throw new GameError('This request is too large.', 413); }
+    try { if (Buffer.byteLength(JSON.stringify(req.body)) > limit) throw new GameError('This request is too large.', 413); }
     catch (error) { if (error instanceof GameError) throw error; throw new GameError('Send valid JSON.'); }
     body = req.body;
   } else {
@@ -28,10 +28,10 @@ async function readBody(req) {
     for await (const chunk of req) {
       const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += value.length;
-      if (bytes > LIMIT) throw new GameError('This request is too large.', 413);
+      if (bytes > limit) throw new GameError('This request is too large.', 413);
       chunks.push(value);
     }
-    body = decodeJSON(Buffer.concat(chunks));
+    body = decodeJSON(Buffer.concat(chunks),limit);
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new GameError('Send a JSON object.');
   return body;

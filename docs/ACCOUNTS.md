@@ -12,6 +12,10 @@ Do not share the private owner link. Use normal game invite links to invite play
 
 Open **Account → Create account**. Nicknames and ratings are public; email, first name, and last name are private to the player and administrator. Emails and nicknames must be unique. Email delivery and email verification are not configured. The site does not claim to send recovery emails.
 
+Under **Account → My profile**, customize your initial (up to two characters) and choose a badge colour, or upload a PNG, JPEG, or WebP picture up to 5 MB. The browser crops it to a 96×96 square before saving. Avatar changes stay local until **Save profile**, and **Reset to nickname initial** removes a saved picture. Your avatar is public to the table; your real name and email remain private. Clicking your own initial badge at a standard table opens the profile editor. Existing seats refresh their avatar on the owner's next game update.
+
+Uploaded avatars are validated as bounded raster images and stored with the account. The public image endpoint serves only the avatar, with versioned cache URLs; normal game polls send the URL rather than repeating picture bytes for every player. External image URLs and executable image formats are not accepted.
+
 Passwords are salted and hashed using scrypt. Login sessions use HttpOnly, SameSite cookies, Secure over HTTPS. Only session hashes are stored in PostgreSQL. Logging out revokes that session. Changing or resetting a password revokes all old sessions. Suspension also revokes sessions and outstanding reset links. Requests check their origin, and persistent rate limits protect account actions. Account, session, room, reset, and ranking tables enable row-level security; the server database owner accesses them directly.
 
 ## Administration and password recovery

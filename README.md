@@ -87,6 +87,10 @@ Table Talk shows public plays with rank and suit, including grouped plays and ca
 
 Hover over or focus the middle playing pile to inspect the last ten public cards; touch users can open the same history by tapping the pile. This history survives burns and pickups and clears for a new round. Failed blind attempts are excluded. Your turn has a red pulsing hand panel and an explicit turn banner; reduced-motion settings use a steady highlight.
 
+The pile inspector also shows a separate **Still in the pile** inventory, grouped by rank and suit with duplicate-copy counts and a highlighted top card. Recent history can include burned or picked-up cards; the inventory contains only the current playing pile. Both sections can be scrolled and focused. Table Talk distinguishes your activity, other players, and table messages with colours and text labels.
+
+Online players can customize their badge or upload an avatar through **Account → My profile**. See [avatar settings](docs/ACCOUNTS.md#player-accounts) for upload limits and privacy. Table names wrap to make longer nicknames readable, and invitation codes use uniform-width characters.
+
 To update an existing MAMP installation, replace the game files in the same folder and refresh the browser. The versioned CSS and JavaScript links load the updated interface. Matches remain in the separate SQLite storage folder.
 
 ## Local storage and reconnecting

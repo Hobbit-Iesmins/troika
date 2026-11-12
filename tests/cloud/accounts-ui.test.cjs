@@ -100,3 +100,46 @@ test('administrator clears a selected player ranked penalties with a reason and 
   assert.equal(p.calls.filter(c=>c.action==='admin_forgive').length,1);assert.equal(p.$('.account-admin-detail .account-conduct-state').textContent,'Ranked play available');assert.ok(p.$('.account-admin-detail .account-conduct').textContent.includes('0 abandonments'));assert.ok(p.$('#account-message').textContent.includes('audit history is kept'));assert.equal(p.$('#account-dialog').open,true);assert.equal(p.notices.length,0);assert.equal(p.errors.length,0);
  }finally{p.close();}
 });
+
+test('custom initials and colors are previewed safely and sent only when changed',async()=>{
+ let current=account({avatar:{kind:'initial',text:'A',color:'gold'}});
+ const p=page(async body=>{if(body.action==='me')return {user:current};if(body.action==='profile'){current={...current,nickname:body.nickname,avatar:Object.hasOwn(body,'avatar')?body.avatar:current.avatar};return {user:current};}throw Error(body.action);});
+ try{
+  await settle();await p.click('#account-button');assert.equal(p.$('#account-avatar-preview').textContent,'A');assert.ok(p.$('.account-avatar-editor').textContent.includes('visible to everyone'));
+  p.$('#account-avatar-initial').value='<b';p.$('#account-avatar-initial').dispatchEvent(new p.w.Event('input',{bubbles:true}));
+  assert.equal(p.$('#account-avatar-preview').textContent,'<b');assert.equal(p.$('#account-avatar-preview b'),null);
+  p.$('#account-avatar-initial').value='XYZ';p.$('#account-avatar-initial').dispatchEvent(new p.w.Event('input',{bubbles:true}));assert.equal(p.$('#account-avatar-initial').value,'XY');
+  await p.click('[data-avatar-color="violet"]');assert.equal(p.$('#account-avatar-preview').dataset.color,'violet');assert.equal(p.$('[data-avatar-color="violet"]').getAttribute('aria-pressed'),'true');
+  await p.submit('form[data-account-form="profile"]');const saved=p.calls.find(c=>c.action==='profile');assert.deepEqual(saved.avatar,{kind:'initial',text:'XY',color:'violet'});assert.equal(saved.avatarInitial,undefined);assert.equal(p.$('#account-dialog').open,false);assert.equal(p.notices.at(-1),'Profile saved. Happy gaming!');
+  await p.click('#account-button');assert.equal(p.$('#account-avatar-preview').textContent,'XY');await p.submit('form[data-account-form="profile"]');assert.equal(Object.hasOwn(p.calls.filter(c=>c.action==='profile').at(-1),'avatar'),false,'unchanged avatar is omitted');
+  await p.click('#account-button');await p.click('#account-avatar-reset');assert.equal(p.$('#account-avatar-preview').textContent,'A');await p.submit('form[data-account-form="profile"]');assert.equal(p.calls.filter(c=>c.action==='profile').at(-1).avatar,null);assert.equal(p.w.localStorage.length,0);assert.equal(p.errors.length,0);
+ }finally{p.close();}
+});
+
+test('raster upload crops a square preview without losing unsaved profile fields',async()=>{
+ const encoded='data:image/webp;base64,UklGRgAAAABXRUJQ',draws=[],revoked=[];let current=account();
+ const p=page(async body=>{if(body.action==='me')return {user:current};if(body.action==='profile'){current={...current,firstName:body.firstName,lastName:body.lastName,avatar:body.avatar};return {user:current};}throw Error(body.action);});
+ try{
+  await settle();await p.click('#account-button');
+  p.w.URL.createObjectURL=()=> 'blob:avatar-test';p.w.URL.revokeObjectURL=url=>revoked.push(url);
+  p.w.Image=class{constructor(){this.naturalWidth=200;this.naturalHeight=100;}set src(value){this._src=value;queueMicrotask(()=>this.onload());}};
+  p.w.HTMLCanvasElement.prototype.getContext=()=>({drawImage:(...args)=>draws.push(args)});p.w.HTMLCanvasElement.prototype.toDataURL=function(type,quality){assert.equal(this.width,96);assert.equal(this.height,96);assert.equal(type,'image/webp');assert.ok(quality<=.78);return encoded;};
+  p.input('firstName','Keep edited first');p.input('lastName','Keep edited last');p.$('#account-avatar-initial').value='AZ';p.$('#account-avatar-initial').dispatchEvent(new p.w.Event('input',{bubbles:true}));
+  const file=new p.w.File(['small raster'],'photo.webp',{type:'image/webp'}),input=p.$('#account-avatar-file');Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new p.w.Event('change',{bubbles:true}));
+  assert.equal(p.$('form[data-account-form="profile"] button[type="submit"]').disabled,true);await settle();
+  assert.equal(p.$('[name="firstName"]').value,'Keep edited first');assert.equal(p.$('[name="lastName"]').value,'Keep edited last');assert.equal(p.$('#account-avatar-initial').value,'AZ');assert.equal(p.$('#account-avatar-preview img').getAttribute('src'),encoded);assert.deepEqual(draws[0].slice(1),[50,0,100,100,0,0,96,96]);assert.deepEqual(revoked,['blob:avatar-test']);assert.equal(p.calls.filter(c=>c.action==='profile').length,0,'upload alone never saves');
+  await p.submit('form[data-account-form="profile"]');const saved=p.calls.find(c=>c.action==='profile');assert.deepEqual(saved.avatar,{kind:'image',dataUrl:encoded});assert.equal(saved.firstName,'Keep edited first');assert.equal(saved.lastName,'Keep edited last');assert.equal(p.$('#account-dialog').open,false);assert.equal(p.errors.length,0);
+ }finally{p.close();}
+});
+
+test('unsupported, oversized and unprocessable uploads keep the profile editable and never save',async()=>{
+ const p=page(async body=>{if(body.action==='me')return {user:account({avatar:{kind:'image',dataUrl:'https://tracker.example/avatar.svg'}})};throw Error(body.action);});
+ try{
+  await settle();await p.click('#account-button');assert.equal(p.$('#account-avatar-preview img'),null,'external avatar URLs are not loaded');p.input('firstName','Keep this edit');
+  const input=p.$('#account-avatar-file'),choose=async file=>{Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new p.w.Event('change',{bubbles:true}));await settle();};
+  await choose({type:'image/svg+xml',size:100});assert.ok(p.$('#account-avatar-status').textContent.includes('PNG, JPEG or WebP'));assert.equal(p.$('#account-dialog').open,true);
+  await choose({type:'image/png',size:5*1024*1024+1});assert.ok(p.$('#account-avatar-status').textContent.includes('smaller than 5 MB'));
+  const revoked=[];p.w.URL.createObjectURL=()=> 'blob:unsupported-canvas';p.w.URL.revokeObjectURL=url=>revoked.push(url);p.w.Image=class{constructor(){this.naturalWidth=100;this.naturalHeight=100;}set src(value){queueMicrotask(()=>this.onload());}};p.w.HTMLCanvasElement.prototype.getContext=()=>null;
+  await choose({type:'image/png',size:100});assert.ok(p.$('#account-avatar-status').textContent.includes('cannot process avatar uploads'));assert.equal(p.$('[name="firstName"]').value,'Keep this edit');assert.equal(p.$('form[data-account-form="profile"] button[type="submit"]').disabled,false);assert.deepEqual(revoked,['blob:unsupported-canvas']);assert.equal(p.calls.filter(c=>c.action==='profile').length,0);assert.equal(p.$('#account-dialog').open,true);assert.equal(p.errors.length,0);
+ }finally{p.close();}
+});

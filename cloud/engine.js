@@ -11,6 +11,36 @@ const compare = (a, b) => Buffer.compare(Buffer.from(String(a)), Buffer.from(Str
 function tk_id() { return randomBytes(12).toString('hex'); }
 function tk_now() { return Date.now() / 1000; }
 function tk_require(condition, message, status = 400) { if (!condition) throw new GameError(message, status); }
+// Public avatars are inert, bounded raster images or short initial badges.
+function tk_avatar(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  if(value.kind==='initial'){
+    if(Object.keys(value).some(k=>!['kind','text','color'].includes(k)))return null;
+    const text=value.text??'',color=value.color??'gold';
+    if(typeof text!=='string'||!text.isWellFormed()||Array.from(text.normalize('NFC')).length>2||/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069<>&]/u.test(text)||!['gold','coral','mint','sky','violet'].includes(color))return null;
+    return {kind:'initial',text:text.normalize('NFC'),color};
+  }
+  if(value.kind!=='image'||Object.keys(value).some(k=>!['kind','dataUrl'].includes(k))||typeof value.dataUrl!=='string'||value.dataUrl.length>24000)return null;
+  const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value.dataUrl);if(!match||match[2].length%4)return null;
+  const bytes=Buffer.from(match[2],'base64');if(bytes.toString('base64')!==match[2])return null;
+  let width=0,height=0;
+  if(match[1]==='png'&&bytes.length>=24&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))&&bytes.toString('ascii',12,16)==='IHDR'){
+    width=bytes.readUInt32BE(16);height=bytes.readUInt32BE(20);
+  }else if(match[1]==='webp'&&bytes.length>=25&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP'){
+    const format=bytes.toString('ascii',12,16);
+    if(format==='VP8X'&&bytes.length>=30){width=bytes.readUIntLE(24,3)+1;height=bytes.readUIntLE(27,3)+1;}
+    else if(format==='VP8L'&&bytes[20]===47){const packed=bytes.readUInt32LE(21);width=(packed&16383)+1;height=((packed>>>14)&16383)+1;}
+    else if(format==='VP8 '&&bytes.length>=30&&bytes.subarray(23,26).equals(Buffer.from([157,1,42]))){width=bytes.readUInt16LE(26)&16383;height=bytes.readUInt16LE(28)&16383;}
+  }else if(match[1]==='jpeg'&&bytes.length>=4&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255){
+    for(let at=2;at+4<=bytes.length;){
+      if(bytes[at]!==255)break;while(bytes[at]===255)at++;const marker=bytes[at++];
+      if(marker===217||marker===218)break;if(marker===1||(marker>=208&&marker<=215))continue;
+      if(at+2>bytes.length)break;const size=bytes.readUInt16BE(at);if(size<2||at+size>bytes.length)break;
+      if([192,193,194,195,197,198,199,201,202,203,205,206,207].includes(marker)&&size>=7){height=bytes.readUInt16BE(at+3);width=bytes.readUInt16BE(at+5);break;}at+=size;
+    }
+  }
+  return width>0&&height>0&&width<=256&&height<=256?{kind:'image',dataUrl:value.dataUrl}:null;
+}
 function tk_settings(settings = {}) {
   tk_require(settings !== null && typeof settings === 'object', 'Choose valid table settings.');
   const mode = own(settings, 'mode') ? settings.mode : 'standard';
@@ -262,7 +292,7 @@ function tk_view(game, youId) {
   const self=g.players.find(p=>p.id===youId);
   const ownBlindCards=g.status==='finished'&&self?(self.dealtDown??self.down):[];
   const scores=Object.values(g.scoreboard).sort((a,b)=>b.wins-a.wins||a.lastPlaces-b.lastPlaces||compare(a.name,b.name));
-  return {room:g.room,status:g.status,settings:tk_game_settings(g),hostId:g.hostId,youId,players:g.players.map(p=>({id:p.id,name:p.name,seat:p.seat,bot:p.bot,ready:p.ready,connected:p.bot||tk_now()-p.lastSeen<25,disconnectedFor:p.bot?0:Math.max(0,Math.trunc(tk_now()-p.lastSeen)),handCount:p.hand.length,hand:p.id===youId?p.hand:null,up:p.up,downCount:p.down.length,downSlots:p.down.map(c=>c.id),finish:p.finish,stats:p.stats,phase:tk_phase(p)})),turnId:g.turnId,deckCount:g.deck.length,pile:g.pile,holeCount:g.hole.length,openingRank:g.openingRank,results:g.results,events:g.events,version:g.version,round:g.round,paused:g.paused,jumpCards:tk_jump_cards(g,youId),scoreboard:scores,lastMove:g.lastMove,recentCards:g.recentCards,ownBlindCards};
+  return {room:g.room,status:g.status,settings:tk_game_settings(g),hostId:g.hostId,youId,players:g.players.map(p=>({id:p.id,name:p.name,seat:p.seat,bot:p.bot,ready:p.ready,connected:p.bot||tk_now()-p.lastSeen<25,disconnectedFor:p.bot?0:Math.max(0,Math.trunc(tk_now()-p.lastSeen)),handCount:p.hand.length,hand:p.id===youId?p.hand:null,up:p.up,downCount:p.down.length,downSlots:p.down.map(c=>c.id),finish:p.finish,stats:p.stats,phase:tk_phase(p),...(tk_avatar(p.avatar)?{avatar:tk_avatar(p.avatar)}:{})})),turnId:g.turnId,deckCount:g.deck.length,pile:g.pile,holeCount:g.hole.length,openingRank:g.openingRank,results:g.results,events:g.events,version:g.version,round:g.round,paused:g.paused,jumpCards:tk_jump_cards(g,youId),scoreboard:scores,lastMove:g.lastMove,recentCards:g.recentCards,ownBlindCards};
 }
 
-module.exports = {GameError,tk_id,tk_now,tk_require,tk_settings,tk_game_settings,tk_new_player,tk_new_game,tk_session_init,tk_record_scores,tk_faces,tk_record_move,tk_jump_cards,tk_jump_in,tk_index,tk_touch,tk_phase,tk_rank_name,tk_start,tk_four_burn,tk_bot_group,tk_sort_hand,tk_can_play,tk_assert_turn,tk_refill,tk_finish_and_advance,tk_play,tk_pickup,tk_bot_step,tk_view};
+module.exports = {GameError,tk_id,tk_now,tk_require,tk_avatar,tk_settings,tk_game_settings,tk_new_player,tk_new_game,tk_session_init,tk_record_scores,tk_faces,tk_record_move,tk_jump_cards,tk_jump_in,tk_index,tk_touch,tk_phase,tk_rank_name,tk_start,tk_four_burn,tk_bot_group,tk_sort_hand,tk_can_play,tk_assert_turn,tk_refill,tk_finish_and_advance,tk_play,tk_pickup,tk_bot_step,tk_view};

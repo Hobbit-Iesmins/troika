@@ -1,7 +1,33 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const crypto=require('node:crypto');
 const {e,card,fixture,ids,faces,play}=require('./fixtures.cjs');
+
+const engineSource=fs.readFileSync(require.resolve('../../cloud/engine.js'),'utf8');
+function seededEngine(seed) {
+  let state=seed>>>0;
+  const nextUint32=()=>{
+    let n=state=(state+0x6d2b79f5)>>>0;
+    n=Math.imul(n^(n>>>15),n|1);n^=n+Math.imul(n^(n>>>7),n|61);
+    return (n^(n>>>14))>>>0;
+  };
+  const randomInt=(min,max)=>{
+    if(max===undefined){max=min;min=0;}
+    const range=max-min;
+    assert.ok(Number.isSafeInteger(min)&&Number.isSafeInteger(max)&&range>0&&range<=0x100000000);
+    const limit=Math.floor(0x100000000/range)*range;
+    let n;do{n=nextUint32();}while(n>=limit);
+    return min+n%range;
+  };
+  // Isolate deterministic deals/blind picks without mutating crypto or seeding IDs.
+  // Same-realm evaluation preserves object prototypes for strict assertions.
+  const engineModule={exports:{}};
+  const localRequire=name=>name==='node:crypto'?{...crypto,randomInt}:require(name);
+  new Function('require','module','exports',engineSource)(localRequire,engineModule,engineModule.exports);
+  return engineModule.exports;
+}
 
 test('settings preserve Standard defaults and reject impossible or malformed tables',()=>{
   assert.deepEqual(e.tk_settings(),{mode:'standard',maxPlayers:5,decks:1});
@@ -176,13 +202,46 @@ test('recent ten and replay retain public card faces after burns and regular pic
 });
 
 for(const [count,decks] of [[5,1],[9,2],[11,2],[12,3],[12,4]])for(const burnRule of ['any','all_suits'])for(const jumpIn of [false,true]){
-  test(`complete ${count}-player ${decks}-deck bot match (${burnRule}, jump=${jumpIn}) conserves cards`,()=>{
+  // Seed 42 is a terminating fixture for each of these 20 rule/table combinations.
+  const seed=42;
+  test(`complete ${count}-player ${decks}-deck bot match (${burnRule}, jump=${jumpIn}, seed=${seed}) conserves cards`,()=>{
+    const matchEngine=seededEngine(seed);
     const settings=count===5?{burnRule,jumpIn}:{mode:'expanded',maxPlayers:count,decks,burnRule,jumpIn};
-    const g=e.tk_new_game('MATCH',e.tk_new_player('Bot 0',0,true),settings);
-    for(let i=1;i<count;i++)g.players.push(e.tk_new_player('Bot '+i,i,true));e.tk_start(g);
+    const g=matchEngine.tk_new_game('MATCH',matchEngine.tk_new_player('Bot 0',0,true),settings);
+    for(let i=1;i<count;i++)g.players.push(matchEngine.tk_new_player('Bot '+i,i,true));matchEngine.tk_start(g);
     const original=ids(g);assert.equal(original.length,52*decks);assert.equal(new Set(original).size,52*decks);
-    let step=0;while(g.status==='playing'&&step<10000){assert.equal(e.tk_bot_step(g),true);assert.deepEqual(ids(g),original);step++;}
+    let step=0;while(g.status==='playing'&&step<10000){assert.equal(matchEngine.tk_bot_step(g),true);assert.deepEqual(ids(g),original);step++;}
     assert.equal(g.status,'finished');assert.equal(g.results.length,count);assert.equal(new Set(g.results).size,count);
-    const score=e.tk_view(g,g.players[0].id).scoreboard;assert.equal(score.reduce((sum,r)=>sum+r.wins,0),1);assert.equal(score.reduce((sum,r)=>sum+r.lastPlaces,0),1);
+    const score=matchEngine.tk_view(g,g.players[0].id).scoreboard;assert.equal(score.reduce((sum,r)=>sum+r.wins,0),1);assert.equal(score.reduce((sum,r)=>sum+r.lastPlaces,0),1);
   });
 }
+
+test('fresh-random bot simulation preserves cards and valid turns for up to 500 moves',()=>{
+  // Greedy bots can revisit game states; termination is covered by seeded fixtures.
+  const g=e.tk_new_game('RANDOM',e.tk_new_player('Bot 0',0,true),{mode:'expanded',maxPlayers:12,decks:4,burnRule:'all_suits',jumpIn:true});
+  for(let i=1;i<12;i++)g.players.push(e.tk_new_player('Bot '+i,i,true));e.tk_start(g);
+  const original=ids(g);assert.equal(original.length,208);assert.equal(new Set(original).size,208);
+  for(let step=0;step<500&&g.status==='playing';step++){
+    assert.equal(e.tk_bot_step(g),true);assert.deepEqual(ids(g),original);
+    assert.ok(['playing','finished'].includes(g.status));
+    assert.equal(new Set(g.results).size,g.results.length);
+    assert.ok(g.results.every(id=>g.players.some(p=>p.id===id)));
+    for(const p of g.players){
+      assert.ok(p.up.length<=3&&p.down.length<=3);
+      if(p.finish!==null){
+        assert.equal(p.finish,g.results.indexOf(p.id)+1);
+        // The final player receives last place while still holding cards.
+        if(p.finish<g.players.length)assert.equal(p.hand.length+p.up.length+p.down.length,0);
+        else assert.equal(g.status,'finished');
+      }else assert.ok(!g.results.includes(p.id));
+    }
+    if(g.status==='playing'){
+      const active=g.players.find(p=>p.id===g.turnId);assert.ok(active);assert.equal(active.finish,null);
+      assert.notEqual(e.tk_phase(active),'out');
+    }else{
+      assert.equal(g.results.length,g.players.length);assert.equal(g.turnId,null);
+      const score=e.tk_view(g,g.players[0].id).scoreboard;
+      assert.equal(score.reduce((sum,r)=>sum+r.wins,0),1);assert.equal(score.reduce((sum,r)=>sum+r.lastPlaces,0),1);
+    }
+  }
+});

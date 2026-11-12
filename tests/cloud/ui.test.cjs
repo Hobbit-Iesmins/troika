@@ -28,7 +28,9 @@ function browser(handler,url='https://troika.example.test/'){
   close(){w.close();},settle};
 }
 test('pile history is visible on hover, survives polling, and supports focus, touch and closing',async()=>{
- const {fixture,card}=require('./fixtures.cjs');const g=fixture();g.recentCards=Array.from({length:12},(_,i)=>({rank:2+i,suit:['S','H','D','C'][i%4]}));g.pile=[card(13,'D')];
+ const {fixture,card}=require('./fixtures.cjs');const g=fixture();g.recentCards=Array.from({length:12},(_,i)=>({rank:2+i,suit:['S','H','D','C'][i%4]}));g.pile=[card(7,'C'),card(13,'D'),card(13,'D')];
+ g.players[0].avatar={kind:'initial',text:'ZZ',color:'mint'};g.players[0].name='Long nickname name';
+ g.events=[{id:1,type:'play',playerId:g.players[0].id,text:'Own move',cards:[]},{id:2,type:'play',playerId:g.players[1].id,text:'Other move',cards:[]},{id:3,type:'lobby',playerId:null,text:'Table message',cards:[]}];g.eventSeq=3;
  const id=g.players[0].id;
  const handler=async(req,res)=>res.end(JSON.stringify({room:g.room,token:'test-seat-token',state:E.tk_view(g,id)}));
  const page=browser(handler);
@@ -38,6 +40,9 @@ test('pile history is visible on hover, survives polling, and supports focus, to
   page.input('#nickname','History tester');await page.submit();
   const activeAvatar=page.$('.seat.active .seat-avatar');
   assert.ok(activeAvatar);
+  assert.equal(activeAvatar.querySelector('.avatar-initial').textContent,'ZZ');assert.ok(activeAvatar.classList.contains('avatar-color-mint'));
+  assert.equal(page.$('.seat.active .seat-name-text').textContent,'Long nickname name');assert.equal(style('.seat.active .seat-name').whiteSpace,'normal');
+  assert.equal(page.$$('#activity .event-own').length,1);assert.equal(page.$$('#activity .event-opponent').length,1);assert.equal(page.$$('#activity .event-system').length,1);assert.equal(page.$('#activity .event-own .event-owner-label').textContent,'YOU');
   await page.poll();assert.equal(page.$('.seat.active .seat-avatar'),activeAvatar,'heartbeat polling preserves the active avatar animation');
   assert.equal(style('#seats').pointerEvents,'none','seat positioning layer does not intercept pile hover');
   assert.equal(style('#seats .seat').pointerEvents,'auto','actual seats stay interactive');
@@ -45,6 +50,7 @@ test('pile history is visible on hover, survives polling, and supports focus, to
   const enter=()=>page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseover',{bubbles:true,relatedTarget:null}));
   const exit=()=>page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseout',{bubbles:true,relatedTarget:null}));
   enter();assert.equal(style('#pile-history').display,'block');assert.equal(page.$('#pile-inspect').getAttribute('aria-expanded'),'true');assert.equal(style('#table-center').zIndex,'10');
+  assert.ok(page.$('.current-pile-section h4').textContent.includes('3'));assert.equal(page.$$('.pile-rank-group').length,2);assert.equal(page.$('.pile-copy-count').textContent,'×2');assert.ok(page.$('.pile-card-top').textContent.includes('K ♦'));assert.equal(page.$('.current-pile-section [data-rank="14"]'),null,'held ace is not part of the actual pile');
   assert.equal(page.$$('#pile-history .history-card').length,10);assert.equal(page.$('#pile-history .history-card').textContent.trim(),'4 ♦');
   page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseout',{bubbles:true,relatedTarget:page.$('#pile-history')}));assert.equal(style('#pile-history').display,'block','moving into history keeps it open');
   E.tk_touch(g,'Another player updates the table','test');await page.poll();assert.equal(style('#pile-history').display,'block','hover remains visible after live table rerenders');
