@@ -238,7 +238,8 @@
     const fails=chosen&&!legal(chosen),label=jump?'Jump in & burn':source==='down'?'Try blind card':source==='up'&&fails?'Attempt & pick up':'Play '+(selected.length>1?selected.length+' cards':'card');
     const canSubmit=turn?selected.length>0:selected.length===1&&canJump(selected[0],source);
     const hint=game.paused?'The host has paused the table.':jump?'Jump-in available: play one highlighted card to complete the burn and steal the turn.':!turn?'Waiting for your turn':source==='down'?'Choose one. Trust your luck.':source==='up'?'Play from the table. Too low? Take only the attempted card + pile.':game.openingRank!==null?'You must open with '+rankName(game.openingRank):'Click to select matching cards · Double-click to play a card';
-    $('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${source==='hand'?'YOUR HAND':source==='up'?'YOUR FACE-UP CARDS':'YOUR BLIND CARDS'} <span style="color:var(--muted)">· ${source==='hand'?p.handCount:source==='up'?p.up.length:p.downCount}</span></strong><span>${game.paused?'PAUSED':turn?'YOUR TURN':jump?'JUMP IN':'HOLD TIGHT'}</span></div><div class="hand-area"><div class="hand-cards">${cards}</div><div class="hand-actions"><button class="primary" id="play-button" ${canSubmit?'':'disabled'}>${label} ${arrow}</button>${source==='hand'?`<button class="secondary" id="pickup-button" ${!turn||!game.pile.length||game.openingRank!==null?'disabled':''}>Pick up pile (${game.pile.length})</button>`:''}</div></div><div class="small-note muted" id="hand-hint" aria-live="polite">${hint}</div>`;
+    $('#hand-panel').innerHTML=`<div class="hand-heading"><strong>${source==='hand'?'YOUR HAND':source==='up'?'YOUR FACE-UP CARDS':'YOUR BLIND CARDS'} <span style="color:var(--muted)">· ${source==='hand'?p.handCount:source==='up'?p.up.length:p.downCount}</span></strong><span>${game.paused?'PAUSED':turn?'YOUR TURN':jump?'JUMP IN':'HOLD TIGHT'}</span></div><div class="hand-area"><div class="hand-cards">${cards}</div><div class="hand-actions"><button class="primary" id="play-button" ${canSubmit?'':'disabled'}>${label} ${arrow}</button>${source==='hand'?`<button type="button" class="secondary matching-play-button" id="play-matching-button" hidden disabled></button><button class="secondary" id="pickup-button" ${!turn||!game.pile.length||game.openingRank!==null?'disabled':''}>Pick up pile (${game.pile.length})</button>`:''}</div></div><div class="small-note muted" id="hand-hint" aria-live="polite">${hint}</div>`;
+    updateMatchingPlayButton();
   }
   function renderSessionTools() {
     const el=$('#session-tools');el.hidden=false;
@@ -320,6 +321,26 @@
     const button=$('#play-button');
     button.disabled=myTurn()?!selected.length:!(selected.length===1&&canJump(selected[0],currentSource()));
     button.innerHTML=(myTurn()?'Play '+(selected.length>1?selected.length+' cards':'card'):'Jump in & burn')+' '+arrow;
+    updateMatchingPlayButton();
+  }
+  function matchingHandGroup() {
+    if(!myTurn()||currentSource()!=='hand')return [];
+    const hand=me().hand,chosen=selected.map(id=>hand.find(c=>c.id===id)).filter(Boolean);
+    if(!chosen.length||!legal(chosen[0]))return [];
+    const matches=hand.filter(c=>c.rank===chosen[0].rank);
+    if(matches.length<2)return [];
+    // Keep the selected physical cards when Expanded decks contain extra copies.
+    return [...chosen,...matches.filter(c=>!selected.includes(c.id))].slice(0,4);
+  }
+  function updateMatchingPlayButton() {
+    const button=$('#play-matching-button');if(!button)return;
+    const group=matchingHandGroup(),visible=group.length>1;
+    button.hidden=!visible;button.disabled=!visible;
+    button.closest('.hand-actions').classList.toggle('has-matches',visible);
+    if(visible){
+      button.textContent='Play '+group.length+' × '+rankName(group[0].rank);
+      button.setAttribute('aria-label','Play '+group.length+' matching cards of rank '+rankName(group[0].rank));
+    }
   }
   function dismissMatching() {
     pendingQuickPlay=null;
@@ -466,6 +487,7 @@
       selectCard(target.dataset.card,target.dataset.source);return;
     }
     if(target.id==='play-button'){await playCards(currentSource(),[...selected]);return;}
+    if(target.id==='play-matching-button'){const group=matchingHandGroup();if(group.length>1)await playCards('hand',group.map(c=>c.id));return;}
     if(target.id==='pickup-button'){await act('pickup');selected=[];return;}
     if(target.id==='ready-button'){await act('ready',{ready:!me().ready});return;}
     if(target.id==='start-button'){await act('start');return;}

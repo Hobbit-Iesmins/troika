@@ -437,3 +437,9 @@ body[data-game-status="playing"][data-paused="false"] .expanded-table .seat.acti
 @media(prefers-reduced-motion:reduce){
   body[data-game-status="playing"] .seat.active .seat-avatar::before{transform:none;opacity:.7}
 }
+
+/* Offer a compact group play between the existing single-play and pickup actions. */
+.hand-actions.has-matches{gap:4px}
+.hand-actions.has-matches .primary,.hand-actions.has-matches .secondary{min-height:30px;padding:6px 7px}
+.hand-actions .matching-play-button{border-color:var(--gold);color:var(--gold);font-weight:bold;white-space:nowrap}
+.hand-actions .matching-play-button:hover:not(:disabled){border-color:var(--gold-bright);color:var(--gold-bright)}

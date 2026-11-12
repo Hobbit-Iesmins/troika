@@ -55,6 +55,8 @@ The selected mode, capacity, and deck count stay fixed for the table and its rem
 
 Click cards once to select them, then use **Play card** as before. You can also double-click a playable card in your hand to play that specific card immediately. If other hand cards have the same rank, a small warning lets you play only the clicked card, play the matching group (up to four), or cancel. Suits do not affect the match. Face-up and blind cards still use the normal selection and Play button.
 
+Selecting a hand card with matching ranks also shows **Play N × rank** between Play card and Pick up pile. For example, select one of three sevens and choose **Play 3 × 7** to play all three immediately. Expanded hands with more than four copies offer four at a time, keeping your selected cards in the group. This shortcut is available only on your turn; jump-ins still use exactly one card.
+
 ## Optional jump-in burns
 
 Enable **Jump-in burns** before creating either a Standard or Expanded table. It is off by default and stays fixed for the table and its rematches.
