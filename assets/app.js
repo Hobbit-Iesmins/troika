@@ -9,7 +9,7 @@
   let draftSettings = {...STANDARD_SETUP}, expandedSetup = {mode:'expanded',maxPlayers:9,decks:2,burnRule:'any',jumpIn:false};
   const THEMES = [['baltic','Baltic Tavern','#315545'],['midnight','Midnight Club','#323d5b'],['neon','Neon Riga','#754788'],['classic','Sunday Classic','#e5e3d5']];
   let game = null, credentials = null, selected = [], chosenSeat = 0, joinMode = false, lobbyPreview = null;
-  let pendingQuickPlay = null, pendingKick = null, managePlayersMarkup = '', ownBlindRevealed = false, pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
+  let pendingQuickPlay = null, pendingKick = null, managePlayersMarkup = '', seatsMarkup = '', ownBlindRevealed = false, pileHistoryOpen = false, pileHistoryHovered = false, replaySnapshot = null;
   let busy = false, polling = false, lastEvent = 0, toastTimer, audio = null, sound = false, pollTimer, previousVersion = -1;
   let draftName = store.get('nickname') || '', draftRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,5);
   const rankName = (r) => ({11:'J',12:'Q',13:'K',14:'A'}[r] || String(r));
@@ -162,7 +162,7 @@
     $('.board-wrap').classList.toggle('expanded-table',capacity()>5);
     if(!game)$('#table-badge').innerHTML='<span class="live-dot"></span> '+capacity()+' SEATS · '+tableSettings().decks+' '+(tableSettings().decks===1?'DECK':'DECKS');
     const players=game?.players || lobbyPreview?.players || [];
-    $('#seats').innerHTML=seats().map(seat=>{
+    const markup=seats().map(seat=>{
       const p=players.find(p=>p.seat===seat);
       if(!p) return `<div class="seat" ${seatAttributes(seat)}><button class="empty-seat ${!game&&chosenSeat===seat?'chosen':''}" data-seat-click="${seat}" aria-label="${game && host()?'Add bot at':'Choose'} seat ${seat+1}" ${game && (game.status!=='lobby'||!host()&&me()?.seat===seat)?'disabled':''}>+</button><span class="seat-caption">${!game&&chosenSeat===seat?'YOUR SPOT':game&&host()&&game.status==='lobby'?'ADD BOT':'SEAT '+(seat+1)}</span></div>`;
       const self=Boolean(game && p.id===game.youId),active=Boolean(game && p.id===game.turnId);
@@ -173,6 +173,8 @@
       }
       return `<div class="seat ${active?'active':''} ${self?'is-self':'other'}" ${seatAttributes(seat)}><div class="seat-avatar">${esc(initial(p.name))}</div><div class="seat-name" title="Seat ${seat+1} · ${esc(p.name)}">${esc(p.name)}${self?'<span class="you-label">YOU</span>':''}</div><div class="seat-count">${!game?(p.bot?'BOT':'SEAT '+(seat+1)):game.status==='lobby'?(p.bot?'BOT · READY':p.ready?'READY':'GETTING READY'):p.finish?ordinal(p.finish)+' PLACE':p.handCount+(capacity()>5?' cards':' IN HAND')}</div>${reserves?`<div class="seat-cards">${reserves}</div>`:''}${game?.status==='lobby' && p.bot && host()?`<button class="remove-bot" data-remove-bot="${seat}" aria-label="Remove ${esc(p.name)} bot">×</button>`:''}${game?.status==='playing'&&host()&&!p.bot&&!self&&!p.connected&&p.disconnectedFor>=30?`<button class="replace-bot" data-replace-bot="${seat}">Let a bot take over</button>`:''}</div>`;
     }).join('');
+    // Keep the active ring running through heartbeat polls and unrelated updates.
+    if(seatsMarkup!==markup){$('#seats').innerHTML=markup;seatsMarkup=markup;}
   }
   function renderPlayers() {
     $('#players-panel').innerHTML=`<div class="side-label">AT THE TABLE <span style="float:right">${game.players.length}/${capacity()}</span></div>`+game.players.map(p=>`<div class="player-list-item"><div class="small-avatar">${esc(initial(p.name))}</div><div><strong>${esc(p.name)}${p.id===game.youId?' · You':''}</strong><small>${p.bot?'Practice bot':p.id===game.hostId?'Table host':p.connected?'Connected':'Reconnecting'} · Seat ${p.seat+1}</small></div><span class="ready-check">${p.finish?ordinal(p.finish):game.status==='lobby'&&p.ready?'✓':p.id===game.turnId?'●':''}</span></div>`).join('');

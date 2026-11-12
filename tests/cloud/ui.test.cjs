@@ -36,6 +36,9 @@ test('pile history is visible on hover, survives polling, and supports focus, to
   const css=page.w.document.createElement('style');css.textContent=fs.readFileSync(path.join(root,'assets/style.css'),'utf8');page.w.document.head.append(css);
   const style=s=>page.w.getComputedStyle(page.$(s));
   page.input('#nickname','History tester');await page.submit();
+  const activeAvatar=page.$('.seat.active .seat-avatar');
+  assert.ok(activeAvatar);
+  await page.poll();assert.equal(page.$('.seat.active .seat-avatar'),activeAvatar,'heartbeat polling preserves the active avatar animation');
   assert.equal(style('#seats').pointerEvents,'none','seat positioning layer does not intercept pile hover');
   assert.equal(style('#seats .seat').pointerEvents,'auto','actual seats stay interactive');
   assert.equal(style('#pile-history').display,'none');
@@ -45,6 +48,7 @@ test('pile history is visible on hover, survives polling, and supports focus, to
   assert.equal(page.$$('#pile-history .history-card').length,10);assert.equal(page.$('#pile-history .history-card').textContent.trim(),'4 ♦');
   page.$('#pile-inspect').dispatchEvent(new page.w.MouseEvent('mouseout',{bubbles:true,relatedTarget:page.$('#pile-history')}));assert.equal(style('#pile-history').display,'block','moving into history keeps it open');
   E.tk_touch(g,'Another player updates the table','test');await page.poll();assert.equal(style('#pile-history').display,'block','hover remains visible after live table rerenders');
+  assert.equal(page.$('.seat.active .seat-avatar'),activeAvatar,'unrelated version updates do not restart the avatar ring');
   exit();assert.equal(style('#pile-history').display,'none');
   page.$('#pile-inspect').focus();assert.equal(style('#pile-history').display,'block');
   E.tk_touch(g,'Keyboard history update','test');await page.poll();assert.equal(page.w.document.activeElement.id,'pile-inspect');assert.equal(style('#pile-history').display,'block','keyboard history stays focused across game updates');
