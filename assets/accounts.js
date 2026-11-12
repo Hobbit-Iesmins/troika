@@ -93,7 +93,12 @@
       }
       if(action==='register')claimToken='';if(action==='reset')resetToken='';
       if(Object.hasOwn(result,'user'))announce(result.user);else await refresh();
-      view=user?'profile':'login';message=action==='profile'?'Profile saved.':action==='password'||action==='reset'?'Password updated.':action==='register'?'Welcome to the club.':'You’re signed in.';error=false;render();
+      if(action==='register'||action==='profile'){
+        view='profile';message='';error=false;render();dialog.close();
+        document.dispatchEvent(new CustomEvent('troika-toast',{detail:{message:'Profile saved. Happy gaming!'}}));
+        return;
+      }
+      view=user?'profile':'login';message=action==='password'||action==='reset'?'Password updated.':'You’re signed in.';error=false;render();
     }catch(e){status(e.message,true);}finally{pending=false;controls.forEach(el=>el.disabled=false);}
   }
   document.addEventListener('submit',event=>{const form=event.target.closest?.('#account-dialog form[data-account-form]');if(form){event.preventDefault();formSubmit(form);}});

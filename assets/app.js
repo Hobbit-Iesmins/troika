@@ -463,6 +463,7 @@
     catch{credentials=null;setConnection(true,CLOUD?'ONLINE PLAY':'LOCAL PLAY');}
     finally{restoringSeat=false;}
   }
+  document.addEventListener('troika-toast',event=>{if(typeof event.detail?.message==='string')toast(event.detail.message);});
   document.addEventListener('troika-account-change',()=>{
     const user=accountUser();if(!user)draftRanked=false;
     if(game?.ranked&&(!user||game.rankedAccountId!==user.id))hideRankedSeat();

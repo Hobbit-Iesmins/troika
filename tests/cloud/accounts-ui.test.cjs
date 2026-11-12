@@ -5,12 +5,12 @@ const account=(extra={})=>({id:'user1',nickname:'Ada',email:'ada@example.test',f
 const tick=()=>new Promise(r=>setImmediate(r));
 async function settle(){for(let i=0;i<5;i++)await tick();}
 function page(handler,{url='https://troika.example.test/',local=false}={}){
- const calls=[],errors=[],events=[];const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
+ const calls=[],errors=[],events=[],notices=[];const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
  const dom=new JSDOM(`<meta name="troika-api" content="${local?'api.php':'/api/game'}"><button id="account-button" hidden>Account</button><button id="ladder-button" hidden>Rankings</button><dialog id="account-dialog"><div id="account-content"></div></dialog>`,{url,runScripts:'outside-only',virtualConsole:vc,pretendToBeVisual:true});const w=dom.window;
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.fetch=async(endpoint,options)=>{const body=JSON.parse(options.body);calls.push({endpoint,...body});const result=await handler(body,endpoint);return {ok:!result.error,json:async()=>result};};
- w.document.addEventListener('troika-account-change',e=>events.push(e.detail.user));w.eval(source);
- return {w,calls,errors,events,$:s=>w.document.querySelector(s),$$:s=>[...w.document.querySelectorAll(s)],async click(s){const el=w.document.querySelector(s);assert.ok(el,s);el.click();await settle();},input(name,value){w.document.querySelector(`[name="${name}"]`).value=value;},async submit(){w.document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await settle();},close(){w.close();}};
+ w.document.addEventListener('troika-account-change',e=>events.push(e.detail.user));w.document.addEventListener('troika-toast',e=>notices.push(e.detail.message));w.eval(source);
+ return {w,calls,errors,events,notices,$:s=>w.document.querySelector(s),$$:s=>[...w.document.querySelectorAll(s)],async click(s){const el=w.document.querySelector(s);assert.ok(el,s);el.click();await settle();},input(name,value){w.document.querySelector(`[name="${name}"]`).value=value;},async submit(){w.document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await settle();},close(){w.close();}};
 }
 test('local MAMP account controls stay hidden and make no cloud requests',async()=>{
  const p=page(()=>{throw Error('unexpected request');},{local:true});try{await settle();assert.equal(p.calls.length,0);assert.equal(p.$('#account-button').hidden,true);assert.equal(p.$('#ladder-button').hidden,true);assert.equal(p.w.TroikaAccounts.user(),null);}finally{p.close();}
@@ -26,10 +26,21 @@ test('owner setup consumes its private fragment, registers with the claim, and s
  try{
   await settle();assert.equal(p.$('#account-button').hidden,false);assert.equal(p.$('#ladder-button').hidden,false);assert.equal(p.w.location.hash,'');assert.equal(p.w.location.search,'?room=ABCDE');assert.ok(p.$('#account-dialog').open);assert.ok(p.$('#account-title').textContent.includes('Owner'));
   p.input('nickname','Owner');p.input('email','owner@example.test');p.input('password','long-private-password');await p.submit();assert.equal(p.w.TroikaAccounts.user().role,'admin');assert.equal(p.w.localStorage.length,0);assert.equal(p.$('[name="password"]'),null);assert.ok(p.events.some(u=>u?.nickname==='Owner'));
+  assert.equal(p.$('#account-dialog').open,false,'registration closes the account dialog');assert.deepEqual(p.notices,['Profile saved. Happy gaming!']);
+  await p.click('#account-button');assert.equal(p.$('#account-dialog').open,true);
   p.input('nickname','Renamed');p.input('firstName','Private first');p.input('lastName','Private last');await p.submit();assert.equal(p.w.TroikaAccounts.user().nickname,'Renamed');assert.equal(p.$('#account-button').textContent,'Renamed · 500');
+  assert.equal(p.$('#account-dialog').open,false,'saving a profile closes the account dialog');assert.equal(p.notices.at(-1),'Profile saved. Happy gaming!');assert.equal(p.notices.length,2);
+  await p.click('#account-button');
   current={...current,elo:900,ratedGames:1};await p.w.TroikaAccounts.refresh();assert.equal(p.$('.account-rating strong').textContent,'900','same-account rating refresh updates an open profile');assert.equal(p.$('#account-button').textContent,'Renamed · 900');
   await p.click('[data-account-view="password"]');p.input('currentPassword','long-private-password');p.input('password','another-long-password');await p.submit();assert.equal(p.calls.find(c=>c.action==='password').currentPassword,'long-private-password');
   await p.click('#account-logout');assert.equal(p.w.TroikaAccounts.user(),null);assert.equal(p.$('#account-button').textContent,'Account');assert.equal(p.errors.length,0);
+ }finally{p.close();}
+});
+test('failed profile save keeps the dialog and entered information visible without a success notice',async()=>{
+ const p=page(async body=>{if(body.action==='me')return {user:account()};if(body.action==='profile')return {error:'That nickname is already registered.'};throw Error(body.action);});
+ try{
+  await settle();await p.click('#account-button');p.input('nickname','AlreadyTaken');p.input('firstName','Keep this name');await p.submit();
+  assert.equal(p.$('#account-dialog').open,true);assert.equal(p.$('[name="nickname"]').value,'AlreadyTaken');assert.equal(p.$('[name="firstName"]').value,'Keep this name');assert.equal(p.$('#account-message').hidden,false);assert.equal(p.$('#account-message').textContent,'That nickname is already registered.');assert.equal(p.$('#account-message').classList.contains('account-error'),true);assert.equal(p.$('form button').disabled,false);assert.deepEqual(p.notices,[]);assert.equal(p.w.TroikaAccounts.user().nickname,'Ada');assert.equal(p.errors.length,0);
  }finally{p.close();}
 });
 test('rankings and match history escape names; admin reset links stay private and corrections have a reason',async()=>{
