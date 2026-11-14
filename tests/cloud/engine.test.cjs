@@ -148,6 +148,39 @@ test('public views hide private cards, tokens and deck and are independent deep 
   assert.equal(own.hand[0].rank,3);assert.equal(other.up[0].rank,7);assert.equal(g.settings.maxPlayers,5);
 });
 
+test('public projection detaches every nested public field without mutating a frozen game',()=>{
+  const g=fixture(),own=g.players[0],other=g.players[1];
+  own.avatar={kind:'initial',text:'AB',color:'mint'};own.accountId='private-account-id';own.tokenHash='private-token-hash';
+  g.pile=[card(11,'H')];g.results=[own.id];
+  g.events=[{id:1,text:'Ada played',type:'play',playerId:own.id,cards:[{rank:11,suit:'H'}]}];
+  g.lastMove={cards:[{rank:11,suit:'H'}],beforePile:[],afterPile:[{rank:11,suit:'H'}]};
+  g.recentCards=[{rank:11,suit:'H',playerName:own.name,moveId:1}];
+  g.scoreboard[own.id].name='Old cached name';
+  const before=structuredClone(g),freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}};freeze(g);
+  const view=e.tk_view(g,own.id);
+  assert.equal(view.scoreboard.find(row=>row.id===own.id).name,own.name,'scoreboard display names stay current');
+  const encoded=JSON.stringify(view);assert.ok(!encoded.includes('private-account-id'));assert.ok(!encoded.includes('private-token-hash'));
+  assert.equal(view.players.find(p=>p.id===other.id).hand,null);
+  view.players[0].hand[0].rank=99;view.players[1].up[0].rank=99;view.players[1].downSlots.push('changed');
+  view.players[0].stats.burns=99;view.players[0].avatar.text='ZZ';view.settings.maxPlayers=99;
+  view.pile[0].rank=99;view.results.push('changed');view.events[0].cards[0].rank=99;
+  view.lastMove.cards[0].rank=99;view.lastMove.afterPile[0].rank=99;view.recentCards[0].rank=99;
+  view.scoreboard.find(row=>row.id===own.id).wins=99;
+  assert.deepEqual(g,before,'neither initializing defaults nor mutating the response changes authoritative state');
+});
+
+test('legacy view defaults are initialized on a detached shell, including PHP empty scoreboards',()=>{
+  for(const legacyScoreboard of ['missing','php-array'])for(const status of ['playing','finished']){
+    const g=fixture();g.status=status;
+    if(legacyScoreboard==='missing')delete g.scoreboard;else g.scoreboard=[];
+    for(const key of ['scoredRounds','paused','lastMove','recentCards'])delete g[key];
+    const before=structuredClone(g),view=e.tk_view(g,g.players[0].id);
+    assert.equal(view.paused,false);assert.equal(view.lastMove,null);assert.deepEqual(view.recentCards,[]);
+    assert.equal(view.scoreboard.length,g.players.length);assert.ok(view.scoreboard.every(row=>row.rounds===0&&row.wins===0));
+    assert.deepEqual(g,before,'reading an old saved game must not initialize or score its original state');
+  }
+});
+
 test('blind deal snapshots stay private until the entire round finishes, then each player sees only their own',()=>{
   const g=fixture(),snapshots=g.players.map(p=>structuredClone(p.dealtDown));
   assert.ok(snapshots.every(cards=>cards.length===3));

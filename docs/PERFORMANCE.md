@@ -13,3 +13,11 @@ Database transaction setup batches BEGIN and both fixed SET LOCAL timeout comman
 A local JSDOM workload used 12 seats, four decks, a 40-card hand and 80 feed events. Across 30 unchanged polls, the previous renderer inserted and removed 2,760 nodes; the updated renderer made zero DOM mutations. Across 30 unrelated profile events, inserted/removed node counts dropped from 16,088/16,200 to 180/292. These are DOM-work measurements, not browser frame-rate measurements. Shared Chrome/browser-control tools were unavailable in the managed workspace, so no FPS or GPU trace was collected.
 
 `tests/cloud/ui.test.cjs` checks zero-mutation idle polling, same-version connection changes, card identity, legal/disabled state updates, keyboard focus, scroll, avatar failure fallback, reconnect banners and replay restart. `tests/cloud/service-performance.test.cjs` checks actual PostgreSQL query counts, transaction-local timeout scope and rollback after a setup error. Existing multiplayer, ranked conduct and local PHP integration checks also pass.
+
+## Storage and projection follow-up
+
+Image avatars now stay only in the account row. Room players store a short cache version, and room writes compact legacy embedded photos for every player, even when a different player polls. A twelve-player, four-deck test with twelve approximately 20 KB photos keeps the room below 40 KB. Public URLs, profile edits and image caching still work.
+
+`tk_view` initializes legacy defaults on a shallow shell and clones only the public projection. It does not clone the private deck, hole or opponents' hands first. Returned data remains detached, and generating a view cannot mutate authoritative state. A local interleaved twelve-player benchmark measured roughly 38% less projection CPU; this is not a browser FPS measurement.
+
+Active ranked room discovery uses an account-ID expression index; room retention and expired throttle-counter cleanup also have indexes. Request throttles apply to table creation, joining and public lobby lookup, without adding rate-limit queries to normal game polling.

@@ -58,12 +58,6 @@ async function startRankedRound(client,g){
   g.ranking={id:randomBytes(16).toString('hex'),status:'pending',startedAt:new Date().toISOString(),participants:g.players.map(p=>({playerId:p.id,accountId:p.accountId,nickname:rows.find(a=>a.id===p.accountId).nickname}))};
   return g.ranking;
 }
-function voidRankedRound(g,reason='host_kick'){
-  if(g.ranked===true&&g.ranking?.status==='pending'){
-    g.ranking.status='void';g.ranking.reason=String(reason).slice(0,80);
-  }
-  return g.ranking??null;
-}
 function decode(value){return typeof value==='string'?JSON.parse(value):value;}
 function resultState(g,row){
   g.ranking.status=row.status;g.ranking.results=decode(row.results);g.ranking.finishedAt=new Date(row.finished).toISOString();
@@ -127,4 +121,4 @@ async function correctRating(client,admin,userId,newRating,reason){
   await client.query('INSERT INTO troika_rating_audit(admin_id,account_id,old_rating,new_rating,reason) VALUES($1,$2,$3,$4,$5)',[admin.id,userId,target.elo,newRating,reason.trim()]);
   return {userId,before:target.elo,after:newRating,tier:tier(newRating)};
 }
-module.exports={tier,ratingChanges,initRankings,startRankedRound,voidRankedRound,finalizeRankedRound,leaderboard,history,correctRating};
+module.exports={tier,ratingChanges,initRankings,startRankedRound,finalizeRankedRound,leaderboard,history,correctRating};

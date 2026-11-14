@@ -94,7 +94,7 @@ async function processRoom(client,g,nowSeconds=Date.now()/1000){
  for(const {p,deadline} of expired){
   const penalty=await recordAbandonment(client,{matchId:g.ranking.id,accountId:p.accountId,room:g.room,reason:'disconnect',occurredAt:deadline});
   result.penalties.push({...penalty,accountId:p.accountId,playerId:p.id});
-  p.bot=true;p.tokenHash='';p.ready=true;p.departureReason='abandonment';
+  p.bot=true;p.tokenHash='';p.ready=true;
   if(g.hostId===p.id)expiredHost=true;
   E.tk_touch(g,p.name+' did not reconnect within five minutes; a bot takes over.','lobby',p.id);
  }

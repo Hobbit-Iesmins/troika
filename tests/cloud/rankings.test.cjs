@@ -66,11 +66,13 @@ dbTest('different simultaneous matches with shared accounts serialize without lo
   assert.ok((await accounts(g)).every(p=>p.rated_games===2));
   for(const p of g.players){const history=await R.history(pool,p.accountId);assert.equal(history.length,2);const sum=history.reduce((total,m)=>total+m.change,500);assert.equal((await accounts(g)).find(a=>a.id===p.accountId).elo,sum);}
 });
-dbTest('a host kick voids the result and history without changing any rating or stats',async()=>{
-  const g=await fixture();g.status='playing';R.voidRankedRound(g,'host_kick');assert.equal(g.ranking.status,'void');assert.equal(await transaction(c=>R.finalizeRankedRound(c,g)),null);
+dbTest('legacy void round snapshots finish and retain history without changing ratings or stats',async()=>{
+  const prior=await fixture();prior.status='playing';prior.ranking.status='void';prior.ranking.reason='host_kick';
+  // This state was persisted by the old policy; new kicks no longer produce it.
+  const g=JSON.parse(JSON.stringify(prior));assert.equal(await transaction(c=>R.finalizeRankedRound(c,g)),null);
   const before=await accounts(g);g.status='finished';await transaction(c=>R.finalizeRankedRound(c,g));assert.deepEqual(await accounts(g),before);assert.ok(g.ranking.results.every(p=>p.change===0));
   const own=await R.history(pool,g.players[1].accountId);assert.equal(own[0].status,'void');assert.equal(own[0].reason,'host_kick');
-  R.voidRankedRound(g,'other');assert.equal(g.ranking.reason,'host_kick');
+  const retry=JSON.parse(JSON.stringify(prior));retry.status='finished';await transaction(c=>R.finalizeRankedRound(c,retry));assert.equal(retry.ranking.status,'void');assert.equal(retry.ranking.reason,'host_kick');assert.deepEqual(await accounts(g),before);
 });
 dbTest('voluntary leave keeps its account in the eventual result even if a bot finishes the seat',async()=>{
   const g=await fixture();g.players[2].bot=true;await transaction(c=>R.finalizeRankedRound(c,g));

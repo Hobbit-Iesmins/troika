@@ -2,6 +2,7 @@
 const { getPool: defaultGetPool, StorageError } = require('../cloud/database.js');
 const { tk_dispatch } = require('../cloud/service.js');
 const { GameError } = require('../cloud/engine.js');
+const { clientIp } = require('../cloud/game-limits.js');
 const LIMIT = 16384;
 function respond(res, status, body) {
   res.statusCode = status;
@@ -48,10 +49,13 @@ function createHandler(options = {}) {
     try {
       require('../cloud/accounts.js').checkOrigin(req);
       const body = await readBody(req);
-      const result = await dispatch(await getPool(), body,{cookie:req.headers.cookie||''});
+      const result = await dispatch(await getPool(), body,{cookie:req.headers.cookie||'',ip:clientIp(req)});
       respond(res, 200, result);
     } catch (error) {
-      if (error instanceof GameError) respond(res, error.status || 400, { error: error.message });
+      if (error instanceof GameError) {
+        if(error.status===429&&Number.isInteger(error.retryAfter)&&error.retryAfter>0)res.setHeader('Retry-After',String(error.retryAfter));
+        respond(res, error.status || 400, { error: error.message });
+      }
       else if (error instanceof StorageError) { console.error('Troika: database request unavailable.', error.code); respond(res, 503, { error: error.message, code: error.code }); }
       else { console.error('Troika: request could not be processed.'); respond(res, 500, { error: 'The game could not process that action. Try again.' }); }
     }

@@ -287,12 +287,20 @@ function tk_bot_step(g) {
   tk_play(g,p.id,source,tk_bot_group(cards,rank,g).map(c=>c.id));return true;
 }
 function tk_view(game, youId) {
-  // Mirror PHP array-value behavior: defaults and all public objects are detached.
-  const g=clone(game);tk_session_init(g);
+  // Initialize defaults on a shallow shell. Session initialization only changes
+  // the shell and scoreboard rows; hidden cards and account data need no clone.
+  const g={...game};
+  if(g.scoreboard)g.scoreboard=Object.fromEntries(Object.entries(g.scoreboard).map(([id,row])=>[id,{...row}]));
+  tk_session_init(g);
   const self=g.players.find(p=>p.id===youId);
   const ownBlindCards=g.status==='finished'&&self?(self.dealtDown??self.down):[];
   const scores=Object.values(g.scoreboard).sort((a,b)=>b.wins-a.wins||a.lastPlaces-b.lastPlaces||compare(a.name,b.name));
-  return {room:g.room,status:g.status,settings:tk_game_settings(g),hostId:g.hostId,youId,players:g.players.map(p=>({id:p.id,name:p.name,seat:p.seat,bot:p.bot,ready:p.ready,connected:p.bot||tk_now()-p.lastSeen<25,disconnectedFor:p.bot?0:Math.max(0,Math.trunc(tk_now()-p.lastSeen)),handCount:p.hand.length,hand:p.id===youId?p.hand:null,up:p.up,downCount:p.down.length,downSlots:p.down.map(c=>c.id),finish:p.finish,stats:p.stats,phase:tk_phase(p),...(tk_avatar(p.avatar)?{avatar:tk_avatar(p.avatar)}:{})})),turnId:g.turnId,deckCount:g.deck.length,pile:g.pile,holeCount:g.hole.length,openingRank:g.openingRank,results:g.results,events:g.events,version:g.version,round:g.round,paused:g.paused,jumpCards:tk_jump_cards(g,youId),scoreboard:scores,lastMove:g.lastMove,recentCards:g.recentCards,ownBlindCards};
+  const now=tk_now();
+  // Detach only the public projection, retaining the read-only view contract.
+  return clone({room:g.room,status:g.status,settings:tk_game_settings(g),hostId:g.hostId,youId,players:g.players.map(p=>{
+    const avatar=tk_avatar(p.avatar);
+    return {id:p.id,name:p.name,seat:p.seat,bot:p.bot,ready:p.ready,connected:p.bot||now-p.lastSeen<25,disconnectedFor:p.bot?0:Math.max(0,Math.trunc(now-p.lastSeen)),handCount:p.hand.length,hand:p.id===youId?p.hand:null,up:p.up,downCount:p.down.length,downSlots:p.down.map(c=>c.id),finish:p.finish,stats:p.stats,phase:tk_phase(p),...(avatar?{avatar}:{})};
+  }),turnId:g.turnId,deckCount:g.deck.length,pile:g.pile,holeCount:g.hole.length,openingRank:g.openingRank,results:g.results,events:g.events,version:g.version,round:g.round,paused:g.paused,jumpCards:tk_jump_cards(g,youId),scoreboard:scores,lastMove:g.lastMove,recentCards:g.recentCards,ownBlindCards});
 }
 
 module.exports = {GameError,tk_id,tk_now,tk_require,tk_avatar,tk_settings,tk_game_settings,tk_new_player,tk_new_game,tk_session_init,tk_record_scores,tk_faces,tk_record_move,tk_jump_cards,tk_jump_in,tk_index,tk_touch,tk_phase,tk_rank_name,tk_start,tk_four_burn,tk_bot_group,tk_sort_hand,tk_can_play,tk_assert_turn,tk_refill,tk_finish_and_advance,tk_play,tk_pickup,tk_bot_step,tk_view};

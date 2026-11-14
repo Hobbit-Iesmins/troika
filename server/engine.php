@@ -5,22 +5,6 @@ declare(strict_types=1);
 function tk_id(): string { return bin2hex(random_bytes(12)); }
 function tk_now(): float { return microtime(true); }
 function tk_require(bool $condition, string $message): void { if (!$condition) throw new RuntimeException($message); }
-/** Optional public avatar metadata; external URLs and executable image formats are not accepted. */
-function tk_avatar(mixed $value): ?array {
-    if(!is_array($value)) return null;
-    if(($value['kind']??null)==='initial') {
-        if(array_diff(array_keys($value),['kind','text','color'])) return null;
-        $text=$value['text']??''; $color=$value['color']??'gold';
-        if(!is_string($text) || preg_match('//u',$text)!==1 || preg_match_all('/./us',$text)>2 || preg_match('/[\x00-\x1f\x7f\x{202a}-\x{202e}\x{2066}-\x{2069}<>&]/u',$text) || !in_array($color,['gold','coral','mint','sky','violet'],true)) return null;
-        return ['kind'=>'initial','text'=>$text,'color'=>$color];
-    }
-    if(($value['kind']??null)!=='image' || array_diff(array_keys($value),['kind','dataUrl']) || !is_string($value['dataUrl']??null) || strlen($value['dataUrl'])>24000) return null;
-    if(!preg_match('/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+\/]+={0,2})$/D',$value['dataUrl'],$parts)) return null;
-    $bytes=base64_decode($parts[2],true); if($bytes===false || base64_encode($bytes)!==$parts[2]) return null;
-    $size=@getimagesizefromstring($bytes); $types=['png'=>IMAGETYPE_PNG,'jpeg'=>IMAGETYPE_JPEG,'webp'=>IMAGETYPE_WEBP];
-    if(!$size || $size[2]!==$types[$parts[1]] || $size[0]<1 || $size[1]<1 || $size[0]>256 || $size[1]>256) return null;
-    return ['kind'=>'image','dataUrl'=>$value['dataUrl']];
-}
 /** Settings are fixed at table creation. Old saved tables use the standard setup. */
 function tk_settings(array $settings=[]): array {
     $mode=array_key_exists('mode',$settings)?$settings['mode']:'standard';
@@ -333,7 +317,6 @@ function tk_view(array $g,string $youId): array {
             'handCount'=>count($p['hand']),'hand'=>$p['id']===$youId?$p['hand']:null,
             'up'=>$p['up'],'downCount'=>count($p['down']),'downSlots'=>array_column($p['down'],'id'),
             'finish'=>$p['finish'],'stats'=>$p['stats'],'phase'=>tk_phase($p)];
-        $avatar=tk_avatar($p['avatar']??null);if($avatar!==null)$out['players'][count($out['players'])-1]['avatar']=$avatar;
     }
     return $out;
 }

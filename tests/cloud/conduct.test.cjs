@@ -43,7 +43,7 @@ dbTest('batch status returns safe per-account fields in one query, without priva
 dbTest('five-minute boundary counts at the exact deadline, revokes the key and transfers the host',async()=>{
  const g=await fixture();g.players[1].lastSeen=T+100;g.players[2].lastSeen=T+100;
  assert.deepEqual(await transaction(c=>C.processRoom(c,g,T+299)),{changed:false,penalties:[]});assert.equal(g.players[0].bot,false);
- const result=await transaction(c=>C.processRoom(c,g,T+300));assert.equal(result.changed,true);assert.equal(result.penalties.length,1);assert.equal(result.penalties[0].occurredAt,T+300);assert.equal(g.players[0].bot,true);assert.equal(g.players[0].tokenHash,'');assert.equal(g.players[0].departureReason,'abandonment');assert.equal(g.hostId,g.players[1].id);assert.equal(g.botAt,T+300.85);assert.ok(g.events[0].text.includes('five minutes'));assert.deepEqual(g.events[0].cards,[]);
+ const result=await transaction(c=>C.processRoom(c,g,T+300));assert.equal(result.changed,true);assert.equal(result.penalties.length,1);assert.equal(result.penalties[0].occurredAt,T+300);assert.equal(g.players[0].bot,true);assert.equal(g.players[0].tokenHash,'');assert.equal(g.hostId,g.players[1].id);assert.equal(g.botAt,T+300.85);assert.ok(g.events[0].text.includes('five minutes'));assert.deepEqual(g.events[0].cards,[]);
  assert.equal((await transaction(c=>C.processRoom(c,g,T+301))).changed,false);assert.equal((await C.getStatus(pool,g.players[0].accountId,T+301)).strikes,1);
 });
 dbTest('a reconnect before timeout refreshes lastSeen and paused-room credit extends the deadline',async()=>{
@@ -52,7 +52,7 @@ dbTest('a reconnect before timeout refreshes lastSeen and paused-room credit ext
  const expired=await transaction(c=>C.processRoom(c,g,T+420));assert.equal(expired.penalties.length,1);assert.equal(expired.penalties[0].playerId,g.players[1].id);assert.equal(g.players[0].bot,false);
 });
 dbTest('finished seats, host-kicked bots, paused and casual rounds never receive disconnect strikes',async()=>{
- const g=await fixture();g.players[0].finish=1;g.players[1].bot=true;g.players[1].departureReason='kick';g.players[2].lastSeen=T+1000;
+ const g=await fixture();g.players[0].finish=1;g.players[1].bot=true;g.players[2].lastSeen=T+1000;
  assert.equal((await transaction(c=>C.processRoom(c,g,T+500))).changed,false);
  for(const change of [x=>x.paused=true,x=>x.ranked=false,x=>x.status='finished',x=>delete x.ranking.startedAt]){
   const copy=await fixture();change(copy);assert.equal((await transaction(c=>C.processRoom(c,copy,T+1000))).changed,false);

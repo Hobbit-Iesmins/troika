@@ -48,7 +48,7 @@ test('rankings and match history escape names; admin reset links stay private an
  const p=page(async(body,endpoint)=>{
   if(body.action==='me')return {user:current};
   if(body.action==='leaderboard'){assert.equal(endpoint,'/api/ladder');return {players:[{nickname:target.nickname,tier:'Trash',elo:500,ratedGames:1,wins:1}]};}
-  if(body.action==='history')return {matches:[{id:'round1',room:'ABCDE',place:2,change:-8,status:'rated',finishedAt:'2026-11-12T10:00:00Z',players:[{nickname:target.nickname}]}]};
+  if(body.action==='history')return {matches:[{id:'round1',room:'ABCDE',place:2,change:-8,status:'rated',finishedAt:'2026-11-12T10:00:00Z',players:[{nickname:target.nickname}]},{id:'old-round',room:'LEGAX',place:1,change:0,status:'void',reason:'<script>Old policy</script>',finishedAt:'2026-11-11T10:00:00Z',players:[{nickname:'Legacy opponent'}]}]};
   if(body.action==='admin_users')return {users:[current,target]};
   if(body.action==='admin_reset')return {resetToken:'private-reset-token',expiresAt:Date.now()+900000};
   if(body.action==='admin_suspend'){target={...target,suspended:body.suspended};return {ok:true};}
@@ -57,7 +57,7 @@ test('rankings and match history escape names; admin reset links stay private an
  });
  try{
   await settle();await p.click('#ladder-button');assert.equal(p.$('#account-content img'),null);assert.ok(p.$('.account-table').textContent.includes(target.nickname));
-  await p.click('[data-account-view="history"]');assert.equal(p.$('#account-content img'),null);assert.ok(p.$('.account-match').textContent.includes('Place 2'));assert.ok(p.$('.account-match').textContent.includes('-8 Elo'));assert.ok(p.$('.account-match').textContent.includes(target.nickname));
+  await p.click('[data-account-view="history"]');assert.equal(p.$('#account-content img'),null);assert.ok(p.$('.account-match').textContent.includes('Place 2'));assert.ok(p.$('.account-match').textContent.includes('-8 Elo'));assert.ok(p.$('.account-match').textContent.includes(target.nickname));const legacy=p.$$('.account-match')[1];assert.ok(legacy.textContent.includes('Unrated round'));assert.ok(legacy.textContent.includes('No change'));assert.ok(legacy.textContent.includes('<script>Old policy</script>'));assert.equal(legacy.querySelector('script'),null);
   await p.click('[data-account-view="admin"]');await p.click('[data-manage-account="user2"]');await p.click('#account-admin-reset');assert.equal(p.$('#account-reset-link').value,'https://troika.example.test/#reset=private-reset-token');assert.equal(p.w.location.hash,'');assert.equal(p.w.localStorage.length,0);
   await p.click('#account-admin-suspend');assert.ok(p.$('#account-admin-suspend').textContent.includes('Restore'));
   p.input('newRating','850');p.input('reason','Correcting a recorded match');await p.submit();const correction=p.calls.find(c=>c.action==='admin_correct');assert.equal(correction.userId,'user2');assert.equal(correction.newRating,850);assert.equal(correction.reason,'Correcting a recorded match');assert.equal(p.errors.length,0);

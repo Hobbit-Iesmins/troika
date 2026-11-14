@@ -4,6 +4,7 @@ const E = require('./engine.js');
 const A = require('./accounts.js');
 const R = require('./rankings.js');
 const C = require('./conduct.js');
+const {limitGame}=require('./game-limits.js');
 const { StorageError, storageError } = require('./database.js');
 const initialized = new WeakMap();
 const SQL_SCHEMA = `CREATE TABLE IF NOT EXISTS troika_rooms (
@@ -29,6 +30,10 @@ function initDatabase(pool) {
         await query(client, 'SELECT pg_advisory_xact_lock(1901176101)');
         await query(client, SQL_SCHEMA);
         await query(client, 'ALTER TABLE troika_rooms ENABLE ROW LEVEL SECURITY');
+        await query(client, `CREATE INDEX IF NOT EXISTS troika_rooms_updated_idx ON troika_rooms(updated);
+          CREATE INDEX IF NOT EXISTS troika_active_ranked_accounts_idx ON troika_rooms
+          USING GIN (jsonb_path_query_array(state,'$.players[*].accountId') jsonb_path_ops)
+          WHERE state->>'ranked'='true' AND state->>'status'='playing'`);
         await R.initRankings(client);
         await query(client, 'COMMIT'); transaction = false;
       } catch (error) {
@@ -82,19 +87,33 @@ function roomCode() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 5 }, () => alphabet[randomInt(alphabet.length)]).join('');
 }
+function roomAvatar(avatar,accountId) {
+  if(avatar?.kind==='image'){
+    if(typeof accountId!=='string'||!/^[a-f0-9]{24}$/.test(accountId))return null;
+    // Photos live only in accounts. Rooms keep a version for cache busting.
+    if(typeof avatar.dataUrl==='string'){
+      const image=E.tk_avatar(avatar);if(!image)return null;
+      return {kind:'image',version:createHash('sha256').update(image.dataUrl).digest('hex').slice(0,16)};
+    }
+    return typeof avatar.version==='string'&&/^[a-f0-9]{16}$/.test(avatar.version)?{kind:'image',version:avatar.version}:null;
+  }
+  return avatar?.kind==='initial'?E.tk_avatar(avatar):null;
+}
+function compactRoomAvatars(game) {
+  for(const player of game.players){const avatar=roomAvatar(player.avatar,player.accountId);if(avatar)player.avatar=avatar;else delete player.avatar;}
+}
 async function save(client, game) {
+  compactRoomAvatars(game);
   E.tk_session_init(game);
   await R.finalizeRankedRound(client, game);
   await query(client, 'UPDATE troika_rooms SET state=$2::jsonb, updated=CURRENT_TIMESTAMP WHERE code=$1', [game.room, JSON.stringify(game)]);
 }
 function view(game,id) {
   const state=E.tk_view(game,id);
+  const sources=new Map(game.players.map(player=>[player.id,player]));
   for(const player of state.players){
-    const source=game.players.find(p=>p.id===player.id);
-    if(player.avatar?.kind==='image'&&source?.accountId){
-      const version=createHash('sha256').update(player.avatar.dataUrl).digest('hex').slice(0,16);
-      player.avatar={kind:'image',url:'/api/avatar?user='+encodeURIComponent(source.accountId)+'&v='+version};
-    }
+    const source=sources.get(player.id);
+    if(source?.avatar?.kind==='image')player.avatar={kind:'image',url:'/api/avatar?user='+encodeURIComponent(source.accountId)+'&v='+source.avatar.version};
   }
   if(game.ranked){state.ranked=true;state.rankedAccountId=game.players.find(p=>p.id===id)?.accountId;state.ranking=game.ranking?{status:game.ranking.status,reason:game.ranking.reason,results:game.ranking.results}:null;}
   return state;
@@ -108,7 +127,7 @@ function initializeConduct(game){
 // account can enter another ranked table. Each old room commits independently.
 async function refreshAccountConduct(pool,accountId){
   const found=await pool.query(`SELECT code FROM troika_rooms WHERE state->>'ranked'='true' AND state->>'status'='playing'
-    AND EXISTS(SELECT 1 FROM jsonb_array_elements(state->'players') p WHERE p->>'accountId'=$1) ORDER BY code`,[accountId]);
+    AND jsonb_path_query_array(state,'$.players[*].accountId') @> $1::jsonb ORDER BY code`,[JSON.stringify([accountId])]);
   for(const {code} of found.rows){
     const c=await pool.connect();let transaction=false;
     try{
@@ -128,6 +147,7 @@ async function tk_dispatch(pool, request, context = {}) {
   const action = request.action ?? '';
   E.tk_require(typeof action === 'string', 'Choose a valid action.');
   await initDatabase(pool);
+  await limitGame(pool,action,context.ip);
   if(['create','join','start'].includes(action)&&context.cookie){
     const probe=await pool.connect();let actor;try{actor=await A.authenticate(probe,context.cookie);}finally{probe.release();}
     if(actor)await refreshAccountConduct(pool,actor.id);
@@ -151,7 +171,7 @@ async function tk_dispatch(pool, request, context = {}) {
       const settings = E.tk_settings(settingsInput);
       const name = tk_nickname(account?.nickname||request.nickname), seat = tk_seat(request.seat ?? 0, settings.maxPlayers);
       const token = newToken(), player = E.tk_new_player(name, seat, false, tokenHash(token));
-      if(account){player.accountId=account.id;if(account.avatar)player.avatar=structuredClone(account.avatar);}
+      if(account){player.accountId=account.id;const avatar=roomAvatar(account.avatar,account.id);if(avatar)player.avatar=avatar;}
       let game;
       for (let attempt = 0; attempt < 20; attempt++) {
         game = E.tk_new_game(roomCode(), player, settings);
@@ -164,6 +184,7 @@ async function tk_dispatch(pool, request, context = {}) {
       }
       if (!game) throw new StorageError('Could not reserve a table code. Please retry.');
       await query(client, "DELETE FROM troika_rooms WHERE updated < CURRENT_TIMESTAMP - INTERVAL '7 days'");
+      await query(client, "DELETE FROM troika_account_limits WHERE expires < CURRENT_TIMESTAMP - INTERVAL '1 day'");
       await query(client, 'COMMIT'); transaction = false;
       return { room: game.room, token, state: view(game, player.id) };
     }
@@ -173,6 +194,7 @@ async function tk_dispatch(pool, request, context = {}) {
     const result = await query(client, 'SELECT state FROM troika_rooms WHERE code=$1 FOR UPDATE', [room]);
     E.tk_require(result.rows.length > 0, 'Table not found. Check the code or create a new table.', 404);
     const game = typeof result.rows[0].state === 'string' ? JSON.parse(result.rows[0].state) : result.rows[0].state;
+    compactRoomAvatars(game);
     E.tk_session_init(game);
     game.settings = E.tk_game_settings(game);
     const capacity = game.settings.maxPlayers;
@@ -185,7 +207,7 @@ async function tk_dispatch(pool, request, context = {}) {
       tk_free_seat(game, seat);
       E.tk_require(!game.players.some(player => tk_same_name(player.name, name)), 'That nickname is already seated here.');
       const token = newToken(), player = E.tk_new_player(name, seat, false, tokenHash(token));
-      if(account){player.accountId=account.id;if(account.avatar)player.avatar=structuredClone(account.avatar);}
+      if(account){player.accountId=account.id;const avatar=roomAvatar(account.avatar,account.id);if(avatar)player.avatar=avatar;}
       if (game.hostId === null) { game.hostId = player.id; player.ready = true; }
       game.players.push(player);
       E.tk_touch(game, name + ' took seat ' + (seat + 1) + '.', 'lobby', player.id);
@@ -206,9 +228,12 @@ async function tk_dispatch(pool, request, context = {}) {
       return {left:true,abandoned:true,rankedStatus};
     }
     game.players[index].lastSeen = E.tk_now();
-    if(account&&game.players[index].accountId===account.id&&JSON.stringify(E.tk_avatar(game.players[index].avatar))!==JSON.stringify(account.avatar)){
-      if(account.avatar)game.players[index].avatar=structuredClone(account.avatar);else delete game.players[index].avatar;
-      E.tk_touch(game,game.players[index].name+' updated their avatar.','profile',id);
+    if(account&&game.players[index].accountId===account.id){
+      const avatar=roomAvatar(account.avatar,account.id);
+      if(JSON.stringify(game.players[index].avatar||null)!==JSON.stringify(avatar)){
+        if(avatar)game.players[index].avatar=avatar;else delete game.players[index].avatar;
+        E.tk_touch(game,game.players[index].name+' updated their avatar.','profile',id);
+      }
     }
     if(game.ranked)game.players[index].rankedPauseCredit=0;
     switch (action) {
@@ -255,7 +280,7 @@ async function tk_dispatch(pool, request, context = {}) {
         tk_host(game,id);
         if(game.ranked)E.tk_require(game.players.every(p=>!p.bot&&typeof p.accountId==='string'),'Remove bot seats before starting a ranked round.');
         if(game.ranked){await client.query('SELECT id FROM troika_accounts WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE',[game.players.map(p=>p.accountId).filter(Boolean)]);for(const p of game.players)await C.assertEligible(client,p.accountId);}
-        E.tk_start(game);if(game.ranked){await R.startRankedRound(client,game);game.ranking.conductSince=E.tk_now();for(const p of game.players){p.rankedPauseCredit=0;delete p.departureReason;}}break;
+        E.tk_start(game);if(game.ranked){await R.startRankedRound(client,game);game.ranking.conductSince=E.tk_now();for(const p of game.players)p.rankedPauseCredit=0;}break;
       case 'play':
         E.tk_require(Array.isArray(request.cards) && request.cards.every(card => typeof card === 'string'), 'Choose a card to play.');
         E.tk_require(typeof request.source === 'string', 'Choose a card source.');
@@ -274,7 +299,6 @@ async function tk_dispatch(pool, request, context = {}) {
           await client.query('SELECT id FROM troika_accounts WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE',[game.players.map(p=>p.accountId).filter(Boolean)]);
           await C.auditKick(client,account,player.accountId,game.room,game.ranking.id);
         }
-        if(game.ranked)player.departureReason='kick';
         if (game.status === 'lobby') game.players.splice(found, 1);
         else {
           player.bot = true; player.tokenHash = ''; player.ready = true;
@@ -303,7 +327,6 @@ async function tk_dispatch(pool, request, context = {}) {
         const name = game.players[index].name;
         if(game.ranked&&game.status==='playing'&&game.players[index].finish===null){
           await C.recordAbandonment(client,{matchId:game.ranking.id,accountId:account.id,room:game.room,reason:'left',occurredAt:E.tk_now()});
-          game.players[index].departureReason='abandonment';
         }
         const rankedStatus=game.ranked?await C.getStatus(client,account.id):undefined;
         if (game.status === 'lobby') game.players.splice(index, 1);

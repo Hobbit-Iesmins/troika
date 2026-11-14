@@ -2,6 +2,7 @@
 const {getPool:defaultGetPool,StorageError}=require('../cloud/database.js');
 const {GameError}=require('../cloud/engine.js');const {readBody}=require('./game.js');
 const {dispatchAccount,initAccounts,checkOrigin}=require('../cloud/accounts.js');
+const {clientIp}=require('../cloud/game-limits.js');
 function createHandler(options={}){
  const getPool=options.getPool||(options.pool?()=>options.pool:defaultGetPool),dispatch=options.dispatch||dispatchAccount;
  return async function handler(req,res){
@@ -17,9 +18,9 @@ function createHandler(options={}){
     const probe=await pool.connect();let actor;try{actor=await accounts.authenticate(probe,req.headers.cookie);}finally{probe.release();}
     if(actor){await service.refreshAccountConduct(pool,actor.id);if(body.action==='admin_forgive'&&actor.role==='admin'&&typeof body.userId==='string')await service.refreshAccountConduct(pool,body.userId);}
    }
-   const result=await dispatch(pool,body,{cookie:req.headers.cookie,ip:req.headers['x-real-ip']||req.socket?.remoteAddress||'unknown',secure:Boolean(process.env.VERCEL||req.headers['x-forwarded-proto']==='https'||req.socket?.encrypted),...(options.bootstrap?{bootstrap:options.bootstrap}:{})});
+   const result=await dispatch(pool,body,{cookie:req.headers.cookie,ip:clientIp(req),secure:Boolean(process.env.VERCEL||req.headers['x-forwarded-proto']==='https'||req.socket?.encrypted),...(options.bootstrap?{bootstrap:options.bootstrap}:{})});
    if(result.cookie)res.setHeader('Set-Cookie',result.cookie);respond(200,result.body);
-  }catch(error){if(error instanceof GameError)respond(error.status||400,{error:error.message});else if(error instanceof StorageError){console.error('Troika: account storage unavailable.',error.code);respond(503,{error:error.message,code:error.code});}else{console.error('Troika: account request failed.');respond(500,{error:'The account action could not be completed. Please try again.'});}}
+  }catch(error){if(error instanceof GameError){if(error.status===429&&Number.isInteger(error.retryAfter)&&error.retryAfter>0)res.setHeader('Retry-After',String(error.retryAfter));respond(error.status||400,{error:error.message});}else if(error instanceof StorageError){console.error('Troika: account storage unavailable.',error.code);respond(503,{error:error.message,code:error.code});}else{console.error('Troika: account request failed.');respond(500,{error:'The account action could not be completed. Please try again.'});}}
  };
 }
 module.exports=createHandler();module.exports.createHandler=createHandler;

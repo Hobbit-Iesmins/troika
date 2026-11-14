@@ -18,6 +18,7 @@ CREATE INDEX IF NOT EXISTS troika_sessions_user_idx ON troika_sessions(user_id);
 CREATE TABLE IF NOT EXISTS troika_password_resets (token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES troika_accounts(id) ON DELETE CASCADE,expires TIMESTAMPTZ NOT NULL);
 CREATE TABLE IF NOT EXISTS troika_owner_claim (singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK(singleton),user_id TEXT NOT NULL REFERENCES troika_accounts(id));
 CREATE TABLE IF NOT EXISTS troika_account_limits (key TEXT PRIMARY KEY,hits INTEGER NOT NULL,expires TIMESTAMPTZ NOT NULL);
+CREATE INDEX IF NOT EXISTS troika_account_limits_expires_idx ON troika_account_limits(expires);
 ALTER TABLE troika_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE troika_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE troika_password_resets ENABLE ROW LEVEL SECURITY;
@@ -67,7 +68,8 @@ async function authenticate(client,cookieHeader,{required=false}={}){
 function cookie(token,secure=true,clear=false){return COOKIE+'='+(token||'')+'; Path=/; HttpOnly; SameSite=Lax; Max-Age='+(clear?0:SESSION_DAYS*86400)+(secure?'; Secure':'');}
 async function createSession(c,id,secure){const token=crypto.randomBytes(32).toString('hex');await c.query("INSERT INTO troika_sessions(token_hash,user_id,expires) VALUES($1,$2,CURRENT_TIMESTAMP+INTERVAL '30 days')",[hash(token),id]);return cookie(token,secure);}
 async function limit(pool,key,max,seconds){
- const row=(await pool.query(`INSERT INTO troika_account_limits(key,hits,expires) VALUES($1,1,CURRENT_TIMESTAMP+$2*INTERVAL '1 second') ON CONFLICT(key) DO UPDATE SET hits=CASE WHEN troika_account_limits.expires<CURRENT_TIMESTAMP THEN 1 ELSE troika_account_limits.hits+1 END,expires=CASE WHEN troika_account_limits.expires<CURRENT_TIMESTAMP THEN EXCLUDED.expires ELSE troika_account_limits.expires END RETURNING hits`,[hash(key),seconds])).rows[0];fail(row.hits<=max,'Too many attempts. Please try again later.',429);
+ const row=(await pool.query(`INSERT INTO troika_account_limits(key,hits,expires) VALUES($1,1,CURRENT_TIMESTAMP+$2*INTERVAL '1 second') ON CONFLICT(key) DO UPDATE SET hits=CASE WHEN troika_account_limits.expires<CURRENT_TIMESTAMP THEN 1 ELSE troika_account_limits.hits+1 END,expires=CASE WHEN troika_account_limits.expires<CURRENT_TIMESTAMP THEN EXCLUDED.expires ELSE troika_account_limits.expires END RETURNING hits,GREATEST(1,CEIL(EXTRACT(EPOCH FROM expires-CURRENT_TIMESTAMP)))::integer AS retry_after`,[hash(key),seconds]).catch(error=>{throw storageError(error);})).rows[0];
+ if(row.hits>max){const error=new GameError('Too many attempts. Please try again later.',429);error.retryAfter=Math.max(1,Math.min(seconds,Number(row.retry_after)||seconds));throw error;}
 }
 async function dispatchAccount(pool,request,context={}){
  fail(request&&typeof request==='object'&&!Array.isArray(request),'Send a JSON object.');
@@ -139,4 +141,4 @@ async function dispatchAccount(pool,request,context={}){
   await c.query('COMMIT');transaction=false;return {body,...(cookieValue?{cookie:cookieValue}:{})};
  }catch(error){if(transaction)await c.query('ROLLBACK').catch(()=>{});if(error instanceof GameError)throw error;if(error.code==='23505')throw new GameError('That email address or nickname is already registered.',409);throw storageError(error);}finally{c.release();}
 }
-module.exports={initAccounts,authenticate,dispatchAccount,privateUser,COOKIE,SQL,hash,normalize,checkOrigin};
+module.exports={initAccounts,authenticate,dispatchAccount,privateUser,COOKIE,SQL,hash,normalize,checkOrigin,limit};

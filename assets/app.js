@@ -379,7 +379,7 @@
     const rating=game.ranking;
     if(game.status==='finished'){
       const own=rating?.results?.find(r=>r.playerId===game.youId);
-      const message=rating?.status==='void'?'Ratings unchanged: the host kicked a player during this round.':own?`${own.change>0?'+':''}${own.change} Elo · ${own.after} · ${own.tier}`:'Recording the ranked result…';
+      const message=rating?.status==='void'?'Ratings unchanged for this archived void round.':own?`${own.change>0?'+':''}${own.change} Elo · ${own.after} · ${own.tier}`:'Recording the ranked result…';
       let note=card.querySelector('.ranked-result');if(!note){note=document.createElement('p');note.className='ranked-result';note.setAttribute('role','status');card.append(note);}writeText(note,message);
     }else if(game.status==='playing'&&!card.querySelector('.ranked-note'))card.insertAdjacentHTML('beforeend','<p class="small-note muted ranked-note">Ranked round · leaving counts immediately; reconnect within five minutes after a disconnect. Bot takeovers keep your Elo result.</p>');
   }
